@@ -466,7 +466,7 @@ class Composer:
 
     # ------------------------------------------------------------------
     def _finalise(self, score: Score, parts: list[Part], total_bars: int) -> None:
-        voices = [(1, 1), (5, 2)] if parts[0].staves > 1 else [(1, 1)]
+        self._clamp_ranges(parts)
         for part in parts:
             vs = [(1, 1)] if part.staves == 1 else [(1, 1), (5, 2)]
             while len(part.measures) < total_bars:
@@ -476,6 +476,39 @@ class Composer:
             if part.measures:
                 part.measures[-1].barline = "light-heavy"
         score.pad_to_equal_length()
+
+
+    def _clamp_ranges(self, parts: list[Part]) -> None:
+        """Last line of defence: no note outside the instrument's real range.
+
+        Octave doubling and register shifts compound, so a nocturne can drift
+        into a register no pianist would voice it in; fold such notes back.
+        """
+        plans = self.plan.instruments or []
+        for part, ip in zip(parts, plans):
+            lo = max(21, ip.range_low or 21)
+            hi = min(108, ip.range_high or 108)
+            if lo >= hi:
+                continue
+            for m in part.measures:
+                for notes in m.voices.values():
+                    for n in notes:
+                        if not n.pitches:
+                            continue
+                        fixed = []
+                        for p in n.pitches:
+                            midi = p.midi
+                            while midi > hi:
+                                midi -= 12
+                            while midi < lo:
+                                midi += 12
+                            fixed.append(p if midi == p.midi else self.key.spell(midi))
+                        seen, uniq = set(), []
+                        for p in sorted(fixed, key=lambda x: x.midi):
+                            if p.midi not in seen:
+                                seen.add(p.midi)
+                                uniq.append(p)
+                        n.pitches = uniq
 
 
 def _dyn_level(d: str) -> float:
