@@ -1,40 +1,41 @@
 import QtQuick 2.15
 
+import "../js/theme.js" as T
+
 Rectangle {
     id: btn
-    property var theme
     property string label: ""
     property bool primary: false
-    property bool enabled: true
+    property bool interactive: true
     signal clicked()
 
     implicitWidth: t.implicitWidth + 20
     implicitHeight: 26
-    radius: theme.radiusSm
-    opacity: enabled ? 1 : 0.45
-    color: !enabled ? theme.surface
-         : primary ? (area.containsMouse ? Qt.lighter(theme.gold, 1.08) : theme.gold)
-         : (area.containsMouse ? theme.surfaceHover : theme.surface)
+    radius: T.radiusSm
+    opacity: interactive ? 1 : 0.45
+    color: !interactive ? T.surface
+         : primary ? (area.containsMouse ? Qt.lighter(T.gold, 1.08) : T.gold)
+         : (area.containsMouse ? T.surfaceHover : T.surface)
     border.width: 1
     border.color: primary ? "transparent"
-                : (area.containsMouse ? theme.borderStrong : theme.border)
-    Behavior on color { ColorAnimation { duration: theme.durFast } }
+                : (area.containsMouse ? T.borderStrong : T.border)
+    Behavior on color { ColorAnimation { duration: T.durFast } }
 
     Text {
         id: t
         anchors.centerIn: parent
         text: btn.label
-        color: btn.primary ? theme.textInverse : theme.text
-        font.family: theme.sans
-        font.pixelSize: theme.fsTiny
+        color: btn.primary ? T.textInverse : T.text
+        font.family: T.sans
+        font.pixelSize: T.fsTiny
         font.weight: btn.primary ? Font.DemiBold : Font.Normal
     }
     MouseArea {
         id: area
         anchors.fill: parent
         hoverEnabled: true
-        enabled: btn.enabled
-        cursorShape: btn.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+        enabled: btn.interactive
+        cursorShape: btn.interactive ? Qt.PointingHandCursor : Qt.ArrowCursor
         onClicked: btn.clicked()
     }
 }

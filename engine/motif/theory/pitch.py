@@ -224,15 +224,25 @@ class Key:
 
     @staticmethod
     def parse(text: str) -> "Key":
-        t = text.strip().replace("♯", "#").replace("♭", "b")
-        parts = t.replace("-", " ").split()
-        tonic = parts[0] if parts else "C"
-        tonic = tonic[0].upper() + tonic[1:].replace("S", "#").replace("F", "b") if len(tonic) > 1 else tonic.upper()
-        mode = " ".join(parts[1:]).lower() or "major"
-        aliases = {"": "major", "maj": "major", "M": "major", "min": "minor", "m": "minor",
-                   "harmonic minor": "harmonic_minor", "melodic minor": "melodic_minor",
-                   "natural minor": "minor", "whole tone": "whole_tone"}
+        """Parse "Eb minor", "F# dorian", "C".  Raises ValueError on nonsense."""
+        raw = (text or "").strip().replace("\u266f", "#").replace("\u266d", "b")
+        if not raw:
+            raise ValueError("empty key")
+        m = re.match(r"^([A-Ga-g])\s*(##|bb|#|b|sharp|flat|)\s*[-\s]*(.*)$", raw)
+        if not m:
+            raise ValueError(f"unparseable key: {text!r}")
+        letter, acc, rest = m.group(1).upper(), m.group(2).lower(), m.group(3).strip().lower()
+        acc = {"sharp": "#", "flat": "b", "": ""}.get(acc, acc)
+        tonic = letter + acc
+
+        mode = rest.replace("-", "_").replace(" ", "_")
+        aliases = {"": "major", "maj": "major", "major": "major", "min": "minor",
+                   "m": "minor", "minor": "minor", "natural_minor": "minor",
+                   "harmonic_minor": "harmonic_minor", "melodic_minor": "melodic_minor",
+                   "whole_tone": "whole_tone", "wholetone": "whole_tone"}
         mode = aliases.get(mode, mode)
+        if mode not in SCALE_INTERVALS and mode not in ("major", "minor"):
+            raise ValueError(f"unknown mode {rest!r} in key {text!r}")
         return Key(tonic, mode)
 
     # -- basics -----------------------------------------------------------

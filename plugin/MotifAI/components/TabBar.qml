@@ -1,9 +1,10 @@
 // The Create / Chat switch pinned to the bottom of the panel.
 import QtQuick 2.15
 
+import "../js/theme.js" as T
+
 Item {
     id: bar
-    property var theme
     property int currentIndex: 0
     property var labels: ["Create", "Chat"]
     property var glyphs: ["✎", "💬"]
@@ -12,11 +13,11 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: theme.bg
+        color: T.bg
         Rectangle {
             anchors { left: parent.left; right: parent.right; top: parent.top }
             height: 1
-            color: theme.border
+            color: T.border
         }
     }
 
@@ -34,16 +35,16 @@ Item {
                     spacing: 7
                     Text {
                         text: bar.glyphs[index]
-                        color: active ? theme.text : theme.textFaint
-                        font.family: theme.sans
+                        color: active ? T.text : T.textFaint
+                        font.family: T.sans
                         font.pixelSize: 13
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Text {
                         text: bar.labels[index]
-                        color: active ? theme.text : theme.textFaint
-                        font.family: theme.sans
-                        font.pixelSize: theme.fsSmall
+                        color: active ? T.text : T.textFaint
+                        font.family: T.sans
+                        font.pixelSize: T.fsSmall
                         anchors.verticalCenter: parent.verticalCenter
                     }
                 }
@@ -52,9 +53,9 @@ Item {
                     width: parent.width * 0.5
                     height: 2
                     radius: 1
-                    color: theme.gold
+                    color: T.gold
                     opacity: active ? 1 : 0
-                    Behavior on opacity { NumberAnimation { duration: theme.durFast } }
+                    Behavior on opacity { NumberAnimation { duration: T.durFast } }
                 }
                 MouseArea {
                     anchors.fill: parent

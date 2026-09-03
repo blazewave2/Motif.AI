@@ -1,8 +1,9 @@
 import QtQuick 2.15
 
+import "../js/theme.js" as T
+
 Item {
     id: field
-    property var theme
     property string label: ""
     property string hint: ""
     property alias value: edit.text
@@ -16,27 +17,27 @@ Item {
 
         Text {
             text: field.label
-            color: theme.textMuted
-            font.family: theme.sans
-            font.pixelSize: theme.fsTiny
+            color: T.textMuted
+            font.family: T.sans
+            font.pixelSize: T.fsTiny
         }
         Rectangle {
             width: parent.width
             height: 32
-            radius: theme.radiusSm
-            color: theme.inputBg
+            radius: T.radiusSm
+            color: T.inputBg
             border.width: 1
-            border.color: edit.activeFocus ? theme.borderFocus : theme.border
-            Behavior on border.color { ColorAnimation { duration: theme.durFast } }
+            border.color: edit.activeFocus ? T.borderFocus : T.border
+            Behavior on border.color { ColorAnimation { duration: T.durFast } }
             TextInput {
                 id: edit
                 anchors { fill: parent; leftMargin: 9; rightMargin: 9 }
                 verticalAlignment: TextInput.AlignVCenter
-                color: theme.text
-                font.family: theme.mono
-                font.pixelSize: theme.fsTiny
-                selectionColor: theme.goldDim
-                selectedTextColor: theme.textInverse
+                color: T.text
+                font.family: T.mono
+                font.pixelSize: T.fsTiny
+                selectionColor: T.goldDim
+                selectedTextColor: T.textInverse
                 selectByMouse: true
                 clip: true
             }
@@ -45,9 +46,9 @@ Item {
             width: parent.width
             text: field.hint
             visible: field.hint.length > 0
-            color: theme.textFaint
-            font.family: theme.sans
-            font.pixelSize: theme.fsTiny
+            color: T.textFaint
+            font.family: T.sans
+            font.pixelSize: T.fsTiny
             wrapMode: Text.WordWrap
         }
     }

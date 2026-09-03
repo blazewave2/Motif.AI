@@ -2,9 +2,10 @@
 // Motif's turns carry the score summary and the actions that follow from it.
 import QtQuick 2.15
 
+import "../js/theme.js" as T
+
 Item {
     id: bubble
-    property var theme
     property string role: "assistant"     // user | assistant | system | error
     property string text: ""
     property string detail: ""
@@ -23,13 +24,13 @@ Item {
     Rectangle {
         id: frame
         width: parent.width
-        radius: theme.radiusMd
-        color: bubble.isUser ? theme.surface
+        radius: T.radiusMd
+        color: bubble.isUser ? T.surface
              : bubble.role === "error" ? Qt.rgba(0.88, 0.47, 0.42, 0.10)
-             : theme.bgElevated
+             : T.bgElevated
         border.width: 1
         border.color: bubble.role === "error" ? Qt.rgba(0.88, 0.47, 0.42, 0.35)
-                    : theme.border
+                    : T.border
         implicitHeight: content.implicitHeight + 22
 
         Column {
@@ -45,14 +46,14 @@ Item {
                 visible: !bubble.isUser
                 Sparkle {
                     width: 9; height: 9
-                    color: bubble.role === "error" ? theme.danger : theme.gold
+                    color: bubble.role === "error" ? T.danger : T.gold
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
                     text: bubble.role === "error" ? "Motif.AI — problem" : "Motif.AI"
-                    color: bubble.role === "error" ? theme.danger : theme.goldDim
-                    font.family: theme.sans
-                    font.pixelSize: theme.fsTiny
+                    color: bubble.role === "error" ? T.danger : T.goldDim
+                    font.family: T.sans
+                    font.pixelSize: T.fsTiny
                     font.letterSpacing: 0.5
                     anchors.verticalCenter: parent.verticalCenter
                 }
@@ -61,9 +62,9 @@ Item {
             Text {
                 width: parent.width
                 text: bubble.text
-                color: theme.text
-                font.family: theme.sans
-                font.pixelSize: theme.fsBody
+                color: T.text
+                font.family: T.sans
+                font.pixelSize: T.fsBody
                 wrapMode: Text.WordWrap
                 lineHeight: 1.36
                 textFormat: Text.StyledText
@@ -75,17 +76,17 @@ Item {
                 width: parent.width
                 visible: bubble.detailOpen && bubble.detail.length > 0
                 height: visible ? detailText.implicitHeight + 16 : 0
-                radius: theme.radiusSm
-                color: theme.inputBg
+                radius: T.radiusSm
+                color: T.inputBg
                 border.width: 1
-                border.color: theme.border
+                border.color: T.border
                 Text {
                     id: detailText
                     anchors { fill: parent; margins: 8 }
                     text: bubble.detail
-                    color: theme.textMuted
-                    font.family: theme.mono
-                    font.pixelSize: theme.fsTiny
+                    color: T.textMuted
+                    font.family: T.mono
+                    font.pixelSize: T.fsTiny
                     wrapMode: Text.WrapAnywhere
                 }
             }
@@ -95,18 +96,15 @@ Item {
                 visible: bubble.showActions && bubble.hasScore
 
                 SmallButton {
-                    theme: bubble.theme
                     label: "Open in MuseScore"
                     primary: true
                     onClicked: bubble.openRequested()
                 }
                 SmallButton {
-                    theme: bubble.theme
                     label: "Try again"
                     onClicked: bubble.regenerateRequested()
                 }
                 SmallButton {
-                    theme: bubble.theme
                     label: bubble.detailOpen ? "Hide plan" : "Plan"
                     visible: bubble.detail.length > 0
                     onClicked: bubble.detailOpen = !bubble.detailOpen

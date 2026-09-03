@@ -2,13 +2,14 @@
 // affordance that only lights up when there is something to send.
 import QtQuick 2.15
 
+import "../js/theme.js" as T
+
 Item {
     id: box
-    property var theme
     property string placeholder: "Describe what you want to compose..."
     property alias text: input.text
     property bool busy: false
-    property bool enabled: true
+    property bool interactive: true
     signal submitted(string value)
 
     implicitHeight: Math.max(96, input.implicitHeight + 46)
@@ -17,18 +18,18 @@ Item {
     function focusInput() { input.forceActiveFocus(); }
     function send() {
         var v = input.text.trim();
-        if (v.length === 0 || busy || !enabled) return;
+        if (v.length === 0 || busy || !interactive) return;
         box.submitted(v);
     }
 
     Rectangle {
         id: frame
         anchors.fill: parent
-        radius: theme.radiusMd
-        color: theme.inputBg
+        radius: T.radiusMd
+        color: T.inputBg
         border.width: 1
-        border.color: input.activeFocus ? theme.borderFocus : theme.border
-        Behavior on border.color { ColorAnimation { duration: theme.durFast } }
+        border.color: input.activeFocus ? T.borderFocus : T.border
+        Behavior on border.color { ColorAnimation { duration: T.durFast } }
 
         TextEdit {
             id: input
@@ -36,14 +37,14 @@ Item {
                 left: parent.left; right: parent.right; top: parent.top
                 leftMargin: 12; rightMargin: 12; topMargin: 11
             }
-            color: theme.text
-            font.family: theme.sans
-            font.pixelSize: theme.fsBody
-            selectionColor: theme.goldDim
-            selectedTextColor: theme.textInverse
+            color: T.text
+            font.family: T.sans
+            font.pixelSize: T.fsBody
+            selectionColor: T.goldDim
+            selectedTextColor: T.textInverse
             wrapMode: TextEdit.Wrap
             selectByMouse: true
-            enabled: box.enabled
+            enabled: box.interactive
             textFormat: TextEdit.PlainText
 
             // Enter sends; Shift+Enter inserts a newline, as in any chat field.
@@ -62,9 +63,9 @@ Item {
         Text {
             anchors.fill: input
             text: box.placeholder
-            color: theme.textFaint
-            font.family: theme.sans
-            font.pixelSize: theme.fsBody
+            color: T.textFaint
+            font.family: T.sans
+            font.pixelSize: T.fsBody
             visible: input.text.length === 0 && !input.activeFocus
             elide: Text.ElideRight
         }
@@ -72,22 +73,22 @@ Item {
         Rectangle {
             id: submit
             width: 30; height: 26
-            radius: theme.radiusSm
+            radius: T.radiusSm
             anchors { right: parent.right; bottom: parent.bottom; margins: 9 }
-            color: submitArea.containsMouse && active ? theme.surfaceActive
-                 : active ? theme.surface : "transparent"
+            color: submitArea.containsMouse && active ? T.surfaceActive
+                 : active ? T.surface : "transparent"
             border.width: 1
-            border.color: active ? theme.borderStrong : theme.border
+            border.color: active ? T.borderStrong : T.border
             readonly property bool active: input.text.trim().length > 0 && !box.busy
             opacity: active ? 1.0 : 0.45
-            Behavior on opacity { NumberAnimation { duration: theme.durFast } }
-            Behavior on color { ColorAnimation { duration: theme.durFast } }
+            Behavior on opacity { NumberAnimation { duration: T.durFast } }
+            Behavior on color { ColorAnimation { duration: T.durFast } }
 
             Text {
                 anchors.centerIn: parent
                 text: box.busy ? "⋯" : "↵"
-                color: submit.active ? theme.text : theme.textFaint
-                font.family: theme.sans
+                color: submit.active ? T.text : T.textFaint
+                font.family: T.sans
                 font.pixelSize: 15
             }
             MouseArea {

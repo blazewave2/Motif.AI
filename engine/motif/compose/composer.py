@@ -93,14 +93,47 @@ class Composer:
         return self.rng.choice(self.style.tempo_terms) if self.style.tempo_terms else ""
 
     def _seed_motif(self) -> Motif:
+        """The cell the whole piece is built from.
+
+        When a trained model is loaded it proposes this cell, which gives the
+        piece a learned melodic voice; the symbolic engine still owns harmony,
+        form and engraving, so a rough proposal cannot derail the structure.
+        """
         lo, hi = self.style.motif_length
         n = self.rng.randint(lo, hi)
         rg = RhythmGenerator(self.rng, self.style.name, self.time, self.style.rhythm_density)
         rhythm = rg.bar()[:n]
         while len(rhythm) < n:
             rhythm.append(EIGHTH)
+
+        if self.model is not None:
+            neural = self._motif_from_model(n)
+            if neural is not None:
+                return neural
         return generate_motif(self.rng, length=n, rhythm=rhythm,
                               style=self.style.name, energy=0.5)
+
+    def _motif_from_model(self, length: int) -> Motif | None:
+        """Extract a motif from a short neural sample, or None on any failure."""
+        try:
+            notes = self.model.melody(style=self.style.name, key=self.key,
+                                      time=self.time, bars=4,
+                                      tempo=float(self.plan.tempo),
+                                      seed=self.plan.seed or None)
+        except Exception:
+            return None
+        pitched = [n for n in notes if n.pitches][:length + 1]
+        if len(pitched) < 3:
+            return None
+        pcs = self.key.scale_pcs
+        steps: list[int] = []
+        for a, b in zip(pitched, pitched[1:]):
+            # Measure the move in letter-names so the cell stays transposable.
+            steps.append(max(-7, min(7, b.pitches[0].diatonic - a.pitches[0].diatonic)))
+        rhythm = [n.duration for n in pitched]
+        if not steps or all(s == 0 for s in steps):
+            return None
+        return Motif(steps=steps, rhythm=rhythm, name="n")
 
     def _transform_motif(self, motif: Motif, sec: SectionPlan, index: int) -> Motif:
         op = sec.motif_op

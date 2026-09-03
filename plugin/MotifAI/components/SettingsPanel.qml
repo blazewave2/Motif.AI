@@ -2,9 +2,10 @@
 // talk to the engine is visible and editable here.
 import QtQuick 2.15
 
+import "../js/theme.js" as T
+
 Item {
     id: panel
-    property var theme
     property string serverUrl: ""
     property string token: ""
     property string styleOverride: ""
@@ -25,14 +26,13 @@ Item {
             width: parent.width
             Text {
                 text: "Settings"
-                color: theme.text
-                font.family: theme.serif
+                color: T.text
+                font.family: T.serif
                 font.pixelSize: 18
                 width: parent.width - back.width
             }
             SmallButton {
                 id: back
-                theme: panel.theme
                 label: "Done"
                 onClicked: {
                     panel.saved(urlField.value, tokenField.value,
@@ -44,7 +44,6 @@ Item {
 
         Field {
             id: urlField
-            theme: panel.theme
             width: parent.width
             label: "Engine address"
             value: panel.serverUrl
@@ -52,7 +51,6 @@ Item {
         }
         Field {
             id: tokenField
-            theme: panel.theme
             width: parent.width
             label: "API token"
             value: panel.token
@@ -62,7 +60,6 @@ Item {
         }
         Field {
             id: styleField
-            theme: panel.theme
             width: parent.width
             label: "Force a style (optional)"
             value: panel.styleOverride
@@ -70,7 +67,6 @@ Item {
         }
         Field {
             id: ensembleField
-            theme: panel.theme
             width: parent.width
             label: "Force an ensemble (optional)"
             value: panel.ensembleOverride
@@ -80,18 +76,18 @@ Item {
         Rectangle {
             width: parent.width
             height: info.implicitHeight + 16
-            radius: theme.radiusSm
-            color: theme.surface
+            radius: T.radiusSm
+            color: T.surface
             border.width: 1
-            border.color: theme.border
+            border.color: T.border
             visible: panel.engineInfo.length > 0
             Text {
                 id: info
                 anchors { fill: parent; margins: 8 }
                 text: panel.engineInfo
-                color: theme.textMuted
-                font.family: theme.mono
-                font.pixelSize: theme.fsTiny
+                color: T.textMuted
+                font.family: T.mono
+                font.pixelSize: T.fsTiny
                 wrapMode: Text.WordWrap
             }
         }

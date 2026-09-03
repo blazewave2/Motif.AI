@@ -58,9 +58,13 @@ def read_musicxml(data: str | bytes) -> Score:
 def _read_part(pnode, part: Part, score: Score, divisions: int, first: bool) -> int:
     from ..score import DIVISIONS
     scale = DIVISIONS / divisions
+    index = 0
     for mnode in pnode.findall("measure"):
-        num = int(mnode.get("number") or len(part.measures) + 1)
-        m = part.measure(num)
+        # The printed number is unreliable: pickup bars are numbered 0, and
+        # repeats and cadenzas use "X1"-style labels. Position is authoritative.
+        index += 1
+        num = index
+        m = part.measure(index)
         attrs = mnode.find("attributes")
         if attrs is not None:
             d = attrs.findtext("divisions")

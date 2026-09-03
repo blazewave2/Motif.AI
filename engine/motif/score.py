@@ -225,6 +225,9 @@ class Part:
     pan: float = 0.0
 
     def measure(self, n: int) -> Measure:
+        """1-based measure access, creating intervening bars as needed."""
+        if n < 1:
+            raise ValueError(f"measure numbers are 1-based, got {n}")
         while len(self.measures) < n:
             self.measures.append(Measure(number=len(self.measures) + 1))
         return self.measures[n - 1]

@@ -14,6 +14,7 @@ import FileIO 3.0
 
 import "components"
 import "js/api.js" as Api
+import "js/theme.js" as T
 
 MuseScore {
     id: root
@@ -47,8 +48,6 @@ MuseScore {
     property int seedCounter: 0
 
     ListModel { id: conversation }
-
-    Theme { id: theme }
 
     FileIO { id: configFile }
     FileIO { id: scoreOut }
@@ -266,18 +265,17 @@ MuseScore {
     //=========================================================================
     Rectangle {
         anchors.fill: parent
-        color: theme.bg
+        color: T.bg
 
         // ---- settings ---------------------------------------------------
         Flickable {
-            anchors { fill: parent; margins: theme.pad }
+            anchors { fill: parent; margins: T.pad }
             visible: root.settingsOpen
             contentHeight: settings.implicitHeight
             clip: true
             SettingsPanel {
                 id: settings
                 width: parent.width
-                theme: theme
                 serverUrl: root.serverUrl
                 token: root.apiToken
                 styleOverride: root.styleOverride
@@ -305,28 +303,26 @@ MuseScore {
                 id: scroller
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                contentHeight: body.implicitHeight + theme.pad * 2
+                contentHeight: body.implicitHeight + T.pad * 2
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
 
                 Column {
                     id: body
-                    x: theme.pad
-                    y: theme.pad
-                    width: scroller.width - theme.pad * 2
+                    x: T.pad
+                    y: T.pad
+                    width: scroller.width - T.pad * 2
                     spacing: 16
 
                     // -- landing ------------------------------------------
                     BrandHeader {
                         width: parent.width
-                        theme: theme
                         visible: root.view === 0
                     }
 
                     StatusStrip {
                         width: parent.width
-                        theme: theme
-                        state: root.connState
+                        status: root.connState
                         detail: root.connDetail
                         onRetryRequested: root.checkHealth()
                         onHelpRequested: root.showStartHelp()
@@ -335,39 +331,38 @@ MuseScore {
                     Text {
                         width: parent.width
                         text: "What are we composing today?"
-                        color: theme.text
-                        font.family: theme.sans
-                        font.pixelSize: theme.fsTitle
+                        color: T.text
+                        font.family: T.sans
+                        font.pixelSize: T.fsTitle
                         visible: root.view === 0
                     }
 
                     PromptBox {
                         id: promptBox
                         width: parent.width
-                        theme: theme
                         busy: root.busy
-                        enabled: !root.busy
+                        interactive: !root.busy
                         visible: root.view === 0
                         onSubmitted: function (value) { root.send(value, false); }
                     }
 
                     Text {
                         text: "Try these examples"
-                        color: theme.textMuted
-                        font.family: theme.sans
-                        font.pixelSize: theme.fsSmall
+                        color: T.textMuted
+                        font.family: T.sans
+                        font.pixelSize: T.fsSmall
                         visible: root.view === 0
                     }
 
                     Column {
-                        width: parent.width
-                        spacing: theme.gap
+                        id: exampleColumn
+                        width: body.width
+                        spacing: T.gap
                         visible: root.view === 0
                         Repeater {
                             model: root.examples
                             delegate: ExampleCard {
-                                width: parent.width
-                                theme: theme
+                                width: exampleColumn.width
                                 line1: modelData.l1
                                 line2: modelData.l2
                                 onActivated: root.send(modelData.prompt, false)
@@ -377,14 +372,15 @@ MuseScore {
 
                     // -- conversation -------------------------------------
                     Column {
-                        width: parent.width
-                        spacing: theme.gap
+                        id: chatColumn
+                        width: body.width
+                        spacing: T.gap
                         visible: root.view === 1
 
                         Repeater {
                             model: conversation
                             delegate: Loader {
-                                width: parent.width
+                                width: chatColumn.width
                                 sourceComponent: model.role === "pending"
                                                  ? pendingRow : bubbleComponent
 
@@ -397,7 +393,6 @@ MuseScore {
                                 Component {
                                     id: bubbleComponent
                                     MessageBubble {
-                                        theme: theme
                                         role: mRole
                                         text: mText
                                         detail: mDetail
@@ -413,7 +408,7 @@ MuseScore {
                                         spacing: 8
                                         Sparkle {
                                             width: 11; height: 11
-                                            color: theme.gold
+                                            color: T.gold
                                             anchors.verticalCenter: parent.verticalCenter
                                             RotationAnimator on rotation {
                                                 from: 0; to: 360
@@ -424,9 +419,9 @@ MuseScore {
                                         }
                                         Text {
                                             text: "Composing…"
-                                            color: theme.textMuted
-                                            font.family: theme.sans
-                                            font.pixelSize: theme.fsBody
+                                            color: T.textMuted
+                                            font.family: T.sans
+                                            font.pixelSize: T.fsBody
                                             anchors.verticalCenter: parent.verticalCenter
                                             SequentialAnimation on opacity {
                                                 loops: Animation.Infinite
@@ -451,25 +446,24 @@ MuseScore {
             // ---- follow-up composer (chat view) --------------------------
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: followUp.implicitHeight + theme.pad
-                color: theme.bg
+                Layout.preferredHeight: followUp.implicitHeight + T.pad
+                color: T.bg
                 visible: root.view === 1
                 Rectangle {
                     anchors { left: parent.left; right: parent.right; top: parent.top }
                     height: 1
-                    color: theme.border
+                    color: T.border
                 }
                 PromptBox {
                     id: followUp
                     anchors {
                         left: parent.left; right: parent.right; top: parent.top
-                        leftMargin: theme.pad; rightMargin: theme.pad
-                        topMargin: theme.pad * 0.6
+                        leftMargin: T.pad; rightMargin: T.pad
+                        topMargin: T.pad * 0.6
                     }
-                    theme: theme
                     placeholder: "Ask for a change, or something new…"
                     busy: root.busy
-                    enabled: !root.busy
+                    interactive: !root.busy
                     onSubmitted: function (value) { root.send(value, false); followUp.clear(); }
                 }
             }
@@ -481,26 +475,26 @@ MuseScore {
 
                 Rectangle {
                     anchors { left: parent.left; right: parent.right; top: parent.top }
-                    anchors.leftMargin: theme.pad
-                    anchors.rightMargin: theme.pad
+                    anchors.leftMargin: T.pad
+                    anchors.rightMargin: T.pad
                     height: 1
-                    color: theme.border
+                    color: T.border
                 }
                 Row {
                     anchors.centerIn: parent
                     spacing: 7
                     Sparkle {
                         width: 11; height: 11
-                        color: theme.gold
+                        color: T.gold
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Text {
                         text: "New chat"
-                        color: newChatArea.containsMouse ? theme.text : theme.textMuted
-                        font.family: theme.sans
-                        font.pixelSize: theme.fsBody
+                        color: newChatArea.containsMouse ? T.text : T.textMuted
+                        font.family: T.sans
+                        font.pixelSize: T.fsBody
                         anchors.verticalCenter: parent.verticalCenter
-                        Behavior on color { ColorAnimation { duration: theme.durFast } }
+                        Behavior on color { ColorAnimation { duration: T.durFast } }
                     }
                 }
                 MouseArea {
@@ -515,7 +509,6 @@ MuseScore {
             TabBar {
                 id: tabs
                 Layout.fillWidth: true
-                theme: theme
                 currentIndex: root.view
                 onCurrentIndexChanged: root.view = currentIndex
             }
@@ -525,13 +518,13 @@ MuseScore {
         Rectangle {
             anchors { top: parent.top; right: parent.right; margins: 8 }
             width: 26; height: 26
-            radius: theme.radiusSm
-            color: gearArea.containsMouse ? theme.surface : "transparent"
+            radius: T.radiusSm
+            color: gearArea.containsMouse ? T.surface : "transparent"
             visible: !root.settingsOpen
             Text {
                 anchors.centerIn: parent
                 text: "⚙"
-                color: gearArea.containsMouse ? theme.text : theme.textFaint
+                color: gearArea.containsMouse ? T.text : T.textFaint
                 font.pixelSize: 14
             }
             MouseArea {
