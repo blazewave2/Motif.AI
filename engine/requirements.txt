@@ -1,0 +1,7 @@
+# The Motif.AI engine has no required dependencies — it runs on the Python
+# standard library alone, so installing the MuseScore plugin needs no venv.
+#
+# Optional extras:
+#   torch>=2.1     enables the trained neural model (inference only)
+#
+# Data preparation and training dependencies live in training/requirements.txt.

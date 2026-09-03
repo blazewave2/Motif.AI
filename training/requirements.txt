@@ -1,0 +1,5 @@
+torch>=2.1
+numpy>=1.26,<2.2
+music21==9.1.0
+modal>=0.64
+tqdm>=4.66

@@ -353,7 +353,11 @@ class Composer:
                 hand_span=self.style.hand_span)
             name = "scale_run" if sec.role == "cadenza" else "arpeggio"
             figures = render_texture(name, ctx)
-            return self._crown(figures, melody, bar_ticks, timeline.start)
+            figures = self._crown(figures, melody, bar_ticks, timeline.start)
+            # Running passagework is phrased in groups, not left bare; without
+            # this a virtuoso etude engraves with no slurs at all.
+            self._phrase_figuration(figures, bar_ticks, timeline.start)
+            return figures
         if mode == "counterpoint":
             return melody
         return self._doubled(melody, key, timeline, sec)
@@ -387,6 +391,25 @@ class Composer:
             out.append(nn)
             t += n.duration
         return out
+
+    def _phrase_figuration(self, notes: list[Note], bar_ticks: int, start: int) -> None:
+        """Slur each bar of figuration and accent its first note."""
+        t = start
+        group_open = False
+        for i, n in enumerate(notes):
+            at_bar = (t - start) % bar_ticks == 0
+            last = i == len(notes) - 1
+            if n.pitches and at_bar and not group_open:
+                n.slur_start = self._slur_id
+                group_open = True
+                if self.rng.random() < self.style.articulation_rate:
+                    n.articulations = list(set(n.articulations + ["accent"]))
+            t += n.duration
+            ends = ((t - start) % bar_ticks == 0) or last
+            if group_open and ends and n.pitches:
+                n.slur_stop = self._slur_id
+                self._slur_id = self._slur_id % 6 + 1
+                group_open = False
 
     def _crown(self, figures: list[Note], melody: list[Note], bar_ticks: int,
                start: int) -> list[Note]:

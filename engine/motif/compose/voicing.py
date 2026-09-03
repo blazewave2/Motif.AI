@@ -114,6 +114,16 @@ def _score_voicing(voices: list[int], chord: Chord, style: VoicingStyle,
         if seventh in missing:
             s -= 7.0
 
+    # Tessitura: the upper three voices belong in the middle of the range, not
+    # packed just above the bass. Without this the opening chord sits muddy and
+    # low, and every voice then has to leap upward into the next one.
+    if len(voices) > 1:
+        upper_mean = sum(voices[1:]) / (len(voices) - 1)
+        target = style.low + (style.high - style.low) * 0.58
+        s -= abs(upper_mean - target) * 0.42
+        soprano_target = style.low + (style.high - style.low) * 0.80
+        s -= abs(voices[-1] - soprano_target) * 0.22
+
     # Spacing: upper voices close, bass allowed to sit low.
     for i in range(1, len(voices) - 1):
         gap = voices[i + 1] - voices[i]
@@ -188,7 +198,7 @@ def _score_voicing(voices: list[int], chord: Chord, style: VoicingStyle,
                     elif moved == 0 and sev_pc in {v % 12 for v in voices}:
                         s += 1.0          # held over as a common tone
                     elif moved > 0:
-                        s -= 4.0
+                        s -= 9.0
             if key is not None and prev_chord.is_dominant_function:
                 lt_pc = (key.tonic_pc - 1) % 12
                 for i, pm in enumerate(prev):

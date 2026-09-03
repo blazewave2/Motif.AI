@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Start the Motif.AI engine from a checkout, with no install step.
+set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PY="${PYTHON:-python3}"
+if ! command -v "$PY" >/dev/null 2>&1; then
+  echo "error: python3 not found. Install Python 3.10 or newer." >&2
+  exit 1
+fi
+exec env PYTHONPATH="$HERE/engine${PYTHONPATH:+:$PYTHONPATH}" "$PY" -m motif "${@:-serve}"
