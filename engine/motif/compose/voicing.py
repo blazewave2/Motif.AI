@@ -33,7 +33,6 @@ def spell_in_chord(midi: int, chord: Chord, key: Key) -> Pitch:
     """Spell a note using the chord's own letter names where it is a chord tone."""
     for cp in chord.pitches(key=key):
         if cp.midi % 12 == midi % 12:
-            octv = (midi - (cp.midi % 12)) // 12 - 1
             cand = Pitch.build(cp.step, cp.alter, cp.octave)
             shift = midi - cand.midi
             if shift % 12 == 0:
@@ -51,7 +50,6 @@ def voice_chord(chord: Chord, key: Key, style: VoicingStyle,
     rng = rng or random.Random(0)
     n = style.n_voices
     pcs = list(chord.pcs)
-    spelled = {p.pc: p for p in chord.pitches(key=key)}
 
     bass_pitch = bass
     if bass_pitch is None:

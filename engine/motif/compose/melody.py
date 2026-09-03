@@ -12,9 +12,9 @@ import math
 import random
 from dataclasses import dataclass
 
-from ..score import DIVISIONS, EIGHTH, Note, QUARTER, SIXTEENTH
+from ..score import Note, QUARTER
 from ..theory.harmony import Chord
-from ..theory.pitch import Key, Pitch, from_midi
+from ..theory.pitch import Key, Pitch
 from .harmony_timeline import HarmonyTimeline
 from .material import Contour, Motif
 

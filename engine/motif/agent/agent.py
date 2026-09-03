@@ -17,9 +17,9 @@ from ..engrave.midi import to_midi
 from ..engrave.musicxml import to_musicxml
 from ..engrave.musicxml_reader import read_musicxml
 from ..engrave.preview import summarise
-from ..plan import CompositionPlan, InstrumentPlan, SectionPlan
+from ..plan import CompositionPlan, SectionPlan
 from ..score import Score
-from ..theory.pitch import Key, Pitch
+from ..theory.pitch import Key
 from .analysis import ScoreAnalysis, analyse
 from .prompt_parser import parse_prompt, parse_key
 
@@ -96,7 +96,9 @@ class MotifAgent:
             if req.score_xml and req.score_xml.strip():
                 try:
                     existing = read_musicxml(req.score_xml)
-                except Exception as exc:
+                except Exception:
+                    # An unreadable score is not fatal: fall back to treating
+                    # the request as a fresh piece rather than refusing it.
                     existing = None
             info = analyse(existing) if existing is not None else None
             if info is not None and info.is_empty:

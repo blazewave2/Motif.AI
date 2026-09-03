@@ -6,7 +6,7 @@ triplets, dotted values and 32nds are all exact.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable, Sequence
+from typing import Iterable
 
 from .theory.pitch import Key, Pitch
 

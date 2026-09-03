@@ -5,15 +5,12 @@ each section says which forces play; everything else rests, properly notated.
 """
 from __future__ import annotations
 
-from dataclasses import replace
-
 from ..engrave.layout import place_voice
 from ..plan import SectionPlan
-from ..score import EIGHTH, HALF, Note, Part, QUARTER, Score
-from ..theory.pitch import Key, Pitch
+from ..score import Note, Part, Score
+from ..theory.pitch import Key
 from .harmony_timeline import HarmonyTimeline
 from .textures import TextureContext, render_texture
-from .voicing import spell_in_chord
 
 #: General MIDI programs and practical ranges for the instruments we score for.
 INSTRUMENTS: dict[str, dict] = {
@@ -96,9 +93,6 @@ def orchestrate(composer, score: Score, parts: list[Part], sec: SectionPlan,
             _rest(part, start_tick, timeline.duration, composer.bar_ticks,
                   beat_ticks, part.staves)
             continue
-        if sec.tutti is False and sec.solo is False:
-            pass  # every section plays unless it is explicitly marked
-
         if role == "solo" and part.staves > 1:
             composer._write_piano(part, sec, key, timeline, melody, start_tick,
                                   bar_ticks, beat_ticks)

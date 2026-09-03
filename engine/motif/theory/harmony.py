@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from typing import Sequence
 
-from .pitch import Interval, Key, Pitch, STEPS, STEP_INDEX, from_midi
+from .pitch import Key, Pitch, STEPS, from_midi
 
 # Chord qualities as (diatonic-step, semitone) pairs above the root.  Carrying
 # the letter distance is what lets a diminished seventh come out as D-F-Ab-Cb

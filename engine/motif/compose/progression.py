@@ -4,8 +4,7 @@ from __future__ import annotations
 import random
 import re
 
-from ..theory.harmony import (CADENCES, Chord, PROGRESSION_LIBRARY, roman_to_chord,
-                              sequence_progression)
+from ..theory.harmony import CADENCES, PROGRESSION_LIBRARY, sequence_progression
 from ..theory.pitch import Key
 from .styles import StyleProfile
 

@@ -9,11 +9,10 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 
-from ..score import (DIVISIONS, EIGHTH, HALF, Note, QUARTER, SIXTEENTH,
-                     THIRTYSECOND, WHOLE, split_duration)
+from ..score import EIGHTH, Note, QUARTER, SIXTEENTH, WHOLE, split_duration
 from ..theory.harmony import Chord
 from ..theory.pitch import Key, Pitch
-from .harmony_timeline import HarmonyTimeline, Span
+from .harmony_timeline import HarmonyTimeline
 from .voicing import spell_in_chord, spread_voicing
 
 
@@ -229,7 +228,6 @@ def arpeggio(ctx: TextureContext) -> list[Note]:
     """Continuous broken chord — the figuration under a Bach prelude or a study."""
     unit = SIXTEENTH if ctx.density > 0.5 else EIGHTH
     out: list[Note] = []
-    direction = 1
     for start, end in _spans_in_bars(ctx):
         for t, d in _subdivide(start, end, unit):
             chord = ctx.timeline.at(t)
@@ -396,7 +394,6 @@ def scale_run(ctx: TextureContext) -> list[Note]:
     direction = 1
     for start, end in _spans_in_bars(ctx):
         for t, d in _subdivide(start, end, unit):
-            chord = ctx.timeline.at(t)
             cand = cur + direction
             while cand % 12 not in pcs:
                 cand += direction

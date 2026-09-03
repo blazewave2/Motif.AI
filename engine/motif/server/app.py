@@ -14,11 +14,9 @@ import socket
 import sys
 import threading
 import time
-import traceback
-from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 from ..agent.agent import MotifAgent, Request
 from ..compose.orchestration import ENSEMBLES

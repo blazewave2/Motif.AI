@@ -6,7 +6,7 @@ that reads and a score that is merely correct.
 """
 from __future__ import annotations
 
-from ..score import (Direction, Measure, Note, Part, split_duration)
+from ..score import Direction, Note, Part, split_duration
 
 
 def place_voice(part: Part, notes: list[Note], *, start_tick: int, bar_ticks: int,

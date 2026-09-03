@@ -11,7 +11,7 @@ from ..score import (DIVISIONS, Direction, EIGHTH, HALF, Note, Part, QUARTER, Sc
 from ..theory.harmony import Chord, roman_to_chord
 from ..theory.pitch import Key, Pitch
 from .harmony_timeline import HarmonyTimeline
-from .material import CONTOUR_BY_NAME, Contour, Motif, develop, generate_motif
+from .material import CONTOUR_BY_NAME, Motif, develop, generate_motif
 from .melody import MelodyWriter, flatten_rhythm, metric_strength
 from .progression import build_progression, chord_durations
 from .rhythm import RhythmGenerator
@@ -125,7 +125,6 @@ class Composer:
         pitched = [n for n in notes if n.pitches][:length + 1]
         if len(pitched) < 3:
             return None
-        pcs = self.key.scale_pcs
         steps: list[int] = []
         for a, b in zip(pitched, pitched[1:]):
             # Measure the move in letter-names so the cell stays transposable.

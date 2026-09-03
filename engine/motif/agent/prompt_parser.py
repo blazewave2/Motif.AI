@@ -11,7 +11,7 @@ import random
 import re
 
 from ..compose.forms import FORMS
-from ..compose.orchestration import ENSEMBLES, build_instruments
+from ..compose.orchestration import build_instruments
 from ..compose.styles import STYLES, match_styles, resolve_style
 from ..plan import CompositionPlan, InstrumentPlan, SectionPlan
 from ..theory.pitch import Key

@@ -13,9 +13,8 @@ import sys
 from pathlib import Path
 
 from ..score import Note, Score
-from ..theory.pitch import Key, Pitch
-from .tokenizer import (GRID, MAX_DUR, MAX_POS, VOCAB, Conditioning,
-                        decode_tokens)
+from ..theory.pitch import Key
+from .tokenizer import MAX_DUR, MAX_POS, VOCAB, Conditioning, decode_tokens
 
 
 class ModelUnavailable(RuntimeError):

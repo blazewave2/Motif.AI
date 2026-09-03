@@ -10,7 +10,7 @@ import re
 import zipfile
 from xml.etree import ElementTree as ET
 
-from ..score import (Direction, Measure, Note, Part, Score, TempoMark, bar_duration)
+from ..score import Direction, Measure, Note, Part, Score, TempoMark
 from ..theory.pitch import Key, Pitch
 
 _CLEF_BACK = {("G", 2): "G", ("F", 4): "F", ("C", 3): "C", ("C", 4): "tenor",

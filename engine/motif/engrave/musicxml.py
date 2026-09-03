@@ -10,8 +10,8 @@ from __future__ import annotations
 from xml.sax.saxutils import escape
 
 from ..score import (DIVISIONS, ChordSymbol, Direction, Measure, Note, Part,
-                     Score, bar_duration, note_type_and_dots)
-from ..theory.pitch import Key, Pitch
+                     Score, note_type_and_dots)
+from ..theory.pitch import Pitch
 
 _HEADER = ('<?xml version="1.0" encoding="UTF-8"?>\n'
            '<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" '

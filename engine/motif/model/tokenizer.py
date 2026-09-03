@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..score import DIVISIONS, Note, Part, Score, bar_duration
-from ..theory.pitch import Key, Pitch
+from ..score import DIVISIONS, Part, Score, bar_duration
+from ..theory.pitch import Key
 
 #: Positions are quantised to a twelfth of a quarter note, which represents
 #: both duple subdivisions and triplets exactly.
@@ -121,7 +121,6 @@ def encode_score(score: Score, style: str = "unknown",
     cond = Conditioning(style=style, key=score.key, time=tuple(score.time),
                         tempo=score.tempo)
     out = cond.tokens()
-    bar_ticks = bar_duration(tuple(score.time))
     n_bars = score.measure_count if max_bars is None else min(score.measure_count, max_bars)
 
     for bar in range(1, n_bars + 1):
@@ -167,8 +166,6 @@ def decode_tokens(tokens: list[str], key: Key | None = None,
     Anything malformed is skipped rather than raising: a sampled sequence is
     not guaranteed to be well-formed, and a partial bar is still music.
     """
-    from ..score import Measure
-
     score = Score()
     style = "unknown"
     fifths, mode = 0, "maj"
@@ -209,8 +206,8 @@ def decode_tokens(tokens: list[str], key: Key | None = None,
     part = Part(id="P1", name="Piano", abbreviation="Pno.", staves=2,
                 clefs={1: "G", 2: "F"})
     score.add_part(part)
-
     bar_ticks = bar_duration(ts)
+
     bars: list[list[tuple[int, int, int, int, int]]] = []
     cur: list[tuple[int, int, int, int, int]] = []
     pos, track = 0, 0

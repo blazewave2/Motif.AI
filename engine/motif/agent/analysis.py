@@ -5,9 +5,9 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 from ..compose.styles import STYLES
-from ..score import DIVISIONS, Score, bar_duration
+from ..score import DIVISIONS, Score
 from ..theory.harmony import CHORD_SPEC, Chord
-from ..theory.pitch import Key, Pitch, from_midi
+from ..theory.pitch import Key, Pitch
 
 
 @dataclass
@@ -135,7 +135,6 @@ def detect_style(a: ScoreAnalysis) -> str:
 def summarise_harmony(score: Score, key: Key, max_bars: int = 16) -> list[str]:
     """A rough chord-per-bar reading, used to continue an existing harmony."""
     out: list[str] = []
-    bar_ticks = bar_duration(tuple(score.time))
     n_bars = min(score.measure_count, max_bars)
     for bar in range(1, n_bars + 1):
         pcs: Counter[int] = Counter()
@@ -158,7 +157,6 @@ def summarise_harmony(score: Score, key: Key, max_bars: int = 16) -> list[str]:
 
 
 def _best_chord_name(pcs: Counter, key: Key) -> str:
-    present = {pc for pc, c in pcs.items() if c >= max(pcs.values()) * 0.18}
     best, best_score = "?", -1e9
     for root in range(12):
         for quality in ("maj", "min", "dom7", "min7", "dim", "half_dim7", "dim7",

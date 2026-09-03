@@ -7,7 +7,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field, replace
 
-from ..score import EIGHTH, QUARTER, SIXTEENTH, THIRTYSECOND
+from ..score import EIGHTH, QUARTER, THIRTYSECOND
 from ..theory.pitch import Key, Pitch
 
 
