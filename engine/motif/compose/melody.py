@@ -12,7 +12,7 @@ import math
 import random
 from dataclasses import dataclass
 
-from ..score import Note, QUARTER
+from ..score import Note, QUARTER, Tuplet
 from ..theory.harmony import Chord
 from ..theory.pitch import Key, Pitch
 from .harmony_timeline import HarmonyTimeline
@@ -118,13 +118,14 @@ class MelodyWriter:
         return [self.key.spell(m) for m in range(lo, hi + 1) if m % 12 in pcs]
 
     # -- main entry -------------------------------------------------------
-    def write(self, timeline: HarmonyTimeline, rhythm: list[tuple[int, int]],
+    def write(self, timeline: HarmonyTimeline,
+              rhythm: list[tuple[int, int, "Tuplet | None"]],
               contour: Contour, *, center: int = 72, amplitude: float = 7.0,
               bar_ticks: int = 1920, beat_ticks: int = QUARTER,
               motif: Motif | None = None, motif_positions: set[int] | None = None,
               start_pitch: Pitch | None = None,
               cadence_pitch: Pitch | None = None) -> list[Note]:
-        """Render a melody.  ``rhythm`` is a list of (start_tick, duration)."""
+        """Render a melody.  ``rhythm`` is (start_tick, duration, tuplet) triples."""
         if not rhythm:
             return []
         targets = self.skeleton(timeline, contour, center, amplitude, start_pitch)
@@ -136,7 +137,7 @@ class MelodyWriter:
         peak_midi = -1
         motif_queue: list[Pitch] = []
 
-        for idx, (tick, dur) in enumerate(rhythm):
+        for idx, (tick, dur, tup) in enumerate(rhythm):
             chord = timeline.at(tick)
             strength = metric_strength(tick, bar_ticks, beat_ticks)
             is_last = idx == len(rhythm) - 1
@@ -158,6 +159,8 @@ class MelodyWriter:
 
             pitch = self._clamp(pitch)
             note = Note([pitch], dur, velocity=self._velocity(strength))
+            if tup is not None:
+                note.tuplet = tup
             notes.append(note)
             if prev is not None:
                 prev_interval = pitch.midi - prev.midi
@@ -283,11 +286,20 @@ class MelodyWriter:
         return targets[k]
 
 
-def flatten_rhythm(bars: list[list[int]], start: int = 0) -> list[tuple[int, int]]:
-    out: list[tuple[int, int]] = []
+def flatten_rhythm(bars, start: int = 0) -> list[tuple[int, int, "Tuplet | None"]]:
+    """Lay bars of rhythm end to end as (tick, duration, tuplet) triples.
+
+    Accepts either plain durations or (duration, tuplet) pairs, so a caller
+    that does not care about tuplets need not build them.
+    """
+    out: list[tuple[int, int, Tuplet | None]] = []
     t = start
     for bar in bars:
-        for d in bar:
-            out.append((t, d))
+        for item in bar:
+            if isinstance(item, tuple):
+                d, tup = item
+            else:
+                d, tup = item, None
+            out.append((t, d, tup))
             t += d
     return out

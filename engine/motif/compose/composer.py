@@ -15,13 +15,13 @@ from .material import CONTOUR_BY_NAME, Motif, develop, generate_motif
 from .melody import MelodyWriter, flatten_rhythm, metric_strength
 from .progression import build_progression, chord_durations
 from .rhythm import RhythmGenerator
+from .expression import (DYN_VELOCITY, ExpressionPlanner, Phrase,
+                         detect_phrases, shift_dynamic)
 from .styles import StyleProfile, resolve_style
 from .textures import TextureContext, render_texture
 from .voicing import spell_in_chord
 
 DYN_SCALE = ["ppp", "pp", "p", "mp", "mf", "f", "ff", "fff"]
-DYN_VELOCITY = {"ppp": 20, "pp": 33, "p": 49, "mp": 64, "mf": 80,
-                "f": 96, "ff": 112, "fff": 126}
 
 
 class Composer:
@@ -36,6 +36,9 @@ class Composer:
         self.beat_ticks = beat_duration(self.time)
         self._slur_id = 1
         self._wedge_id = 1
+        self.expression = ExpressionPlanner(self.rng, self.style, float(plan.tempo))
+        self._section_starts: list[int] = []
+        self._phrases: list[Phrase] = []
 
     # ------------------------------------------------------------------
     def render(self) -> Score:
@@ -50,8 +53,7 @@ class Composer:
         for part in parts:
             score.add_part(part)
 
-        score.tempos.append(TempoMark(1, p.tempo, text=p.tempo_text or
-                                      self._tempo_word()))
+        opening = p.tempo_text or self._tempo_word()
 
         motif = self._seed_motif()
         bar_cursor = 0
@@ -72,6 +74,7 @@ class Composer:
                 sec, sec_key, timeline, sec_motif, bar_ticks, beat_ticks,
                 last_melody_pitch)
 
+            self._section_starts.append(bar_cursor)
             self._write_section(score, parts, sec, sec_key, timeline, melody,
                                 start_tick, bar_ticks, beat_ticks, si,
                                 changed_key=(str(sec_key) != str(prev_key)) or si == 0,
@@ -79,6 +82,10 @@ class Composer:
             bar_cursor += sec.bars
             prev_key = sec_key
 
+        score.tempos = self.expression.tempo_marks(p.sections, self._section_starts,
+                                                   self.bar_ticks)
+        if score.tempos:
+            score.tempos[0].text = opening or score.tempos[0].text
         self._finalise(score, parts, bar_cursor)
         return score
 
@@ -221,7 +228,7 @@ class Composer:
         return best
 
     # ------------------------------------------------------------------
-    def _apply_surface(self, notes: list[Note], rhythm: list[tuple[int, int]],
+    def _apply_surface(self, notes: list[Note], rhythm: list[tuple[int, int, object]],
                        sec: SectionPlan, key: Key, bar_ticks: int,
                        beat_ticks: int) -> None:
         """Slurs, articulations, ornaments and grace notes on the melody."""
@@ -264,7 +271,8 @@ class Composer:
             return
         out: list[Note] = []
         for n in notes:
-            if (n.pitches and n.duration >= QUARTER and self.rng.random() < rate):
+            if (n.pitches and n.duration >= QUARTER and n.tuplet is None
+                    and self.rng.random() < rate):
                 p = n.pitches[0]
                 up = self.rng.random() < 0.55
                 g = p.transpose_diatonic(1 if up else -1, key)
@@ -314,6 +322,12 @@ class Composer:
                      timeline: HarmonyTimeline, melody: list[Note],
                      start_tick: int, bar_ticks: int, beat_ticks: int) -> None:
         rh = self._right_hand(sec, key, timeline, melody, bar_ticks, beat_ticks)
+        self._phrases = detect_phrases(rh, start_tick, bar_ticks, sec.bars, sec.energy)
+        # The melody is voiced slightly forward of the accompaniment, which is
+        # what a pianist does with the balance between the hands.
+        self.expression.shape(rh, self._phrases, start_tick, bar_ticks=bar_ticks,
+                              beat_ticks=beat_ticks, base=sec.dynamic or "mf",
+                              melody=True, lead_offset=5)
         place_voice(part, rh, start_tick=start_tick, bar_ticks=self.bar_ticks,
                     beat_ticks=beat_ticks, voice=1, staff=1)
 
@@ -322,8 +336,12 @@ class Composer:
             low=self.style.lh_range[0], high=self.style.lh_range[1], staff=2, voice=5,
             density=self.style.rhythm_density * (0.7 + sec.energy * 0.6),
             style=self.style.name, dynamic=_dyn_level(sec.dynamic),
-            hand_span=self.style.hand_span, pedal=self.style.pedal != "none")
+            hand_span=self.style.hand_span, pedal=self.style.pedal != "none",
+            variety=self._variety(sec))
         lh = render_texture(sec.texture_lh, ctx)
+        self.expression.shape(lh, self._phrases, start_tick, bar_ticks=bar_ticks,
+                              beat_ticks=beat_ticks, base=sec.dynamic or "mf",
+                              melody=False, lead_offset=-15)
         place_voice(part, lh, start_tick=start_tick, bar_ticks=self.bar_ticks,
                     beat_ticks=beat_ticks, voice=5, staff=2)
 
@@ -332,8 +350,26 @@ class Composer:
                            low=max(48, self.style.lh_range[1] - 4),
                            high=min(76, self.style.rh_range[0] + 10), density=0.3)
             inner = render_texture("sustained", ictx)
+            self.expression.shape(inner, self._phrases, start_tick, bar_ticks=bar_ticks,
+                                  beat_ticks=beat_ticks, base=sec.dynamic or "mf",
+                                  melody=False, lead_offset=-22)
             place_voice(part, inner, start_tick=start_tick, bar_ticks=self.bar_ticks,
                         beat_ticks=beat_ticks, voice=2, staff=1)
+
+    def _variety(self, sec: SectionPlan) -> float:
+        """How freely the accompaniment may vary its rhythm from bar to bar.
+
+        Baroque figuration is deliberately even; Romantic writing is not, and a
+        long section needs more variation than a short one to stay alive.
+        """
+        base = {"baroque": 0.22, "classical": 0.45, "romantic": 0.7,
+                "late_romantic": 0.75, "impressionist": 0.65,
+                "contemporary": 0.5}.get(self.style.era, 0.5)
+        if sec.bars >= 12:
+            base += 0.12
+        if sec.role in ("development", "transition"):
+            base += 0.1
+        return max(0.05, min(0.95, base))
 
     def _right_hand(self, sec: SectionPlan, key: Key, timeline: HarmonyTimeline,
                     melody: list[Note], bar_ticks: int, beat_ticks: int) -> list[Note]:
@@ -349,7 +385,7 @@ class Composer:
                 staff=1, voice=1,
                 density=min(0.95, self.style.rhythm_density + 0.25 + sec.energy * 0.2),
                 style=self.style.name, dynamic=_dyn_level(sec.dynamic),
-                hand_span=self.style.hand_span)
+                hand_span=self.style.hand_span, variety=self._variety(sec))
             name = "scale_run" if sec.role == "cadenza" else "arpeggio"
             figures = render_texture(name, ctx)
             figures = self._crown(figures, melody, bar_ticks, timeline.start)
@@ -480,18 +516,17 @@ class Composer:
                         start_tick, self.bar_ticks)
         if sec.bars < 4 or self.style.dynamic_volatility < 0.25:
             return
-        # A hairpin toward the section's high point, then relax.
+        # One hairpin pair per phrase, so the page shows the same shape the
+        # playback does.
+        for tick, direction in self.expression.hairpins(
+                getattr(self, "_phrases", []), base, staff=1,
+                wedge_id_start=self._wedge_id, bar_ticks=bar_ticks):
+            place_direction(main, direction, tick, self.bar_ticks)
+        self._wedge_id = self._wedge_id % 6 + 1
+
+        # Restate the level once at the section's high point.
         peak_bar = max(1, int(sec.bars * 0.62))
-        grow = "crescendo" if sec.energy >= 0.5 else "diminuendo"
-        n = self._wedge_id
-        self._wedge_id = self._wedge_id % 4 + 1
-        place_direction(main, Direction("wedge", grow, 0, 1, "below",
-                                        extra={"number": n}),
-                        start_tick + bar_ticks, self.bar_ticks)
-        place_direction(main, Direction("wedge", "stop", 0, 1, "below",
-                                        extra={"number": n}),
-                        start_tick + peak_bar * bar_ticks, self.bar_ticks)
-        target = _shift_dynamic(base, 1 if grow == "crescendo" else -1)
+        target = shift_dynamic(base, 1 if sec.energy >= 0.5 else -1)
         place_direction(main, Direction("dynamics", target, 0, 1, "below",
                                         extra={"dynamics_velocity":
                                                DYN_VELOCITY.get(target, 80)}),
@@ -571,14 +606,6 @@ def _dyn_level(d: str) -> float:
         return DYN_SCALE.index(d) / (len(DYN_SCALE) - 1)
     except ValueError:
         return 0.5
-
-
-def _shift_dynamic(d: str, step: int) -> str:
-    try:
-        i = DYN_SCALE.index(d)
-    except ValueError:
-        i = 4
-    return DYN_SCALE[max(0, min(len(DYN_SCALE) - 1, i + step))]
 
 
 def compose(plan: CompositionPlan, model=None) -> Score:

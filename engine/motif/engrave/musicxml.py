@@ -399,8 +399,15 @@ class MusicXMLWriter:
         self._close("harmony")
 
     def _note(self, n: Note, multi_staff: bool, staff: int) -> None:
+        # MusicXML carries playback nuance on the note itself, as a percentage
+        # where 100 is a forte. Writing it preserves the shaping that makes the
+        # music sound played rather than printed.
+        attrs = ""
+        if n.pitches and not n.grace:
+            pct = max(1, min(400, round(n.velocity / 0.90)))
+            attrs = f'dynamics="{pct}"'
         for i, p in enumerate(n.pitches or [None]):
-            self._open("note")
+            self._open("note", attrs if i == 0 else "")
             if n.grace:
                 self._w('<grace slash="yes"/>' if n.grace_slash else '<grace/>')
             if i > 0:

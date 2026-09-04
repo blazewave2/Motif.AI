@@ -9,7 +9,8 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 
-from ..score import EIGHTH, Note, QUARTER, SIXTEENTH, WHOLE, split_duration
+from ..score import (EIGHTH, HALF, Note, QUARTER, SIXTEENTH, THIRTYSECOND, Tuplet,
+                     WHOLE, split_duration)
 from ..theory.harmony import Chord
 from ..theory.pitch import Key, Pitch
 from .harmony_timeline import HarmonyTimeline
@@ -32,6 +33,7 @@ class TextureContext:
     dynamic: float = 0.5           # 0..1, drives velocity
     hand_span: int = 14            # semitones a hand can stretch
     pedal: bool = True
+    variety: float = 0.5           # how much the figuration is allowed to change
     extra: dict = field(default_factory=dict)
 
     @property
@@ -97,9 +99,123 @@ def _subdivide(span_start: int, span_end: int, unit: int) -> list[tuple[int, int
     return out
 
 
+def _bar_rhythm(ctx: TextureContext, start: int, end: int, unit: int
+                ) -> list[tuple[int, int, Tuplet | None]]:
+    """One bar of accompaniment rhythm, varied the way a player varies it.
+
+    A figuration that repeats the same subdivision for forty bars is the single
+    most mechanical thing an accompaniment can do.  Each bar therefore has a
+    chance of breathing: pausing on the last beat, holding a note through,
+    thinning to a slower pulse, or turning over in triplets.
+    """
+    span = end - start
+    if span <= 0:
+        return []
+    plain = [(t, d, None) for t, d in _subdivide(start, end, unit)]
+    if ctx.variety <= 0.01:
+        return plain
+
+    roll = ctx.rng.random()
+    v = ctx.variety
+
+    # Triplets: the same span turned over in threes.
+    if roll < 0.10 * v and span % 3 == 0 and unit * 3 <= span:
+        group = unit * 2                     # three notes per two units
+        out: list[tuple[int, int, Tuplet | None]] = []
+        t = start
+        n = 0
+        while t + group <= end:
+            each = group // 3
+            for i in range(3):
+                tup = Tuplet(3, 2, "eighth" if each >= SIXTEENTH else "16th",
+                             start=(i == 0), stop=(i == 2), number=1)
+                out.append((t + i * each, each, tup))
+            t += group
+            n += 1
+        if t < end:
+            out.extend((tt, dd, None) for tt, dd in _subdivide(t, end, unit))
+        if out:
+            return out
+
+    # Rest on the final beat: lets the melody speak.
+    if roll < 0.10 + 0.16 * v:
+        cut = max(start + unit, end - max(unit, ctx.beat_ticks))
+        return [(t, d, None) for t, d in _subdivide(start, cut, unit)]
+
+    # Hold the last note of the bar instead of repeating the figure.
+    if roll < 0.26 + 0.18 * v:
+        cut = max(start + unit, end - ctx.beat_ticks)
+        out = [(t, d, None) for t, d in _subdivide(start, cut, unit)]
+        if cut < end:
+            out.append((cut, end - cut, None))
+        return out
+
+    # Halve the motion for a bar — a natural place to lean back.
+    if roll < 0.44 + 0.12 * v and unit * 2 <= span:
+        return [(t, d, None) for t, d in _subdivide(start, end, unit * 2)]
+
+    # Double the motion at an intense moment.
+    if roll < 0.52 + 0.14 * v and unit // 2 >= THIRTYSECOND and ctx.density > 0.55:
+        return [(t, d, None) for t, d in _subdivide(start, end, unit // 2)]
+
+    # Begin off the beat, letting the bar start with air.
+    if roll < 0.60 + 0.10 * v and span > unit * 2:
+        return [(t, d, None) for t, d in _subdivide(start + unit, end, unit)]
+
+    # A dotted lilt instead of even motion.
+    if roll < 0.68 + 0.10 * v and unit >= SIXTEENTH * 2:
+        out: list[tuple[int, int, Tuplet | None]] = []
+        t = start
+        long, short = unit + unit // 2, unit // 2
+        while t + long + short <= end:
+            out.append((t, long, None))
+            out.append((t + long, short, None))
+            t += long + short
+        if t < end:
+            out.extend((tt, dd, None) for tt, dd in _subdivide(t, end, unit))
+        if out:
+            return out
+
+    # An uneven 3+3+2 grouping, which stops a bar from ticking.
+    if roll < 0.74 + 0.08 * v and span == unit * 8:
+        return [(start, unit * 3, None), (start + unit * 3, unit * 3, None),
+                (start + unit * 6, unit * 2, None)]
+
+    return plain
+
+
 # ---------------------------------------------------------------------------
 # textures
 # ---------------------------------------------------------------------------
+def _figuration(ctx: TextureContext, unit: int, pick) -> list[Note]:
+    """Drive a repeating figure through varied bar rhythms.
+
+    ``pick(chord, step, count, bass)`` returns the pitches for one slot, so a
+    texture only has to say *which notes*, not *when* — the rhythmic breathing
+    is shared by every figuration.
+    """
+    out: list[Note] = []
+    for start, end in _spans_in_bars(ctx):
+        pattern = _bar_rhythm(ctx, start, end, unit)
+        if not pattern:
+            continue
+        count = len(pattern)
+        filled = 0
+        for step, (t, d, tup) in enumerate(pattern):
+            chord = ctx.timeline.at(t)
+            bass = _bass(chord, ctx.key, ctx.low, ctx.low + 12)
+            pitches = pick(chord, step, count, bass)
+            note = ctx.note(list(pitches), d)
+            if tup is not None:
+                note.tuplet = tup
+            out.append(note)
+            filled += d
+        # A bar the figure left short is a real rest, not a gap.
+        if filled < end - start:
+            out.append(ctx.note([], end - start - filled))
+    return out
+
+
 def block_chords(ctx: TextureContext) -> list[Note]:
     out: list[Note] = []
     for span in ctx.timeline.spans:
@@ -126,19 +242,14 @@ def sustained(ctx: TextureContext) -> list[Note]:
 def alberti(ctx: TextureContext) -> list[Note]:
     """The classical low-high-middle-high figure."""
     unit = SIXTEENTH if ctx.density > 0.62 else EIGHTH
-    out: list[Note] = []
-    for start, end in _spans_in_bars(ctx):
-        for t, d in _subdivide(start, end, unit):
-            chord = ctx.timeline.at(t)
-            b = _bass(chord, ctx.key, ctx.low, ctx.low + 12)
-            up = _stack(chord, ctx.key, b, 2, ctx.hand_span)
-            hi = up[-1] if up else b
-            mid = up[0] if up else b
-            pattern = [b, hi, mid, hi]
-            idx = ((t - start) // unit) % 4
-            out.append(ctx.note([pattern[idx]], d))
-    return out
 
+    def pick(chord, step, count, bass):
+        up = _stack(chord, ctx.key, bass, 2, ctx.hand_span)
+        hi = up[-1] if up else bass
+        mid = up[0] if up else bass
+        return [[bass, hi, mid, hi][step % 4]]
+
+    return _figuration(ctx, unit, pick)
 
 def waltz(ctx: TextureContext) -> list[Note]:
     """Bass on one, chords on two and three."""
@@ -171,95 +282,63 @@ def march(ctx: TextureContext) -> list[Note]:
 
 
 def nocturne(ctx: TextureContext) -> list[Note]:
-    """Chopin's wide left hand: low bass, then a rising span of chord tones.
+    """Chopin's wide left hand: a low bass, then chord tones rising above it.
 
-    The bass is left alone for a beat and the upper notes fill in above it, which
-    is what gives the texture its characteristic breadth under the pedal.
+    Leaving the bass alone for a beat and filling in above it is what gives the
+    texture its breadth under the pedal.
     """
     unit = EIGHTH if ctx.density < 0.7 else SIXTEENTH
-    out: list[Note] = []
-    for start, end in _spans_in_bars(ctx):
-        steps = _subdivide(start, end, unit)
-        n = len(steps)
-        if n == 0:
-            continue
-        chord = ctx.timeline.at(start)
-        b = _bass(chord, ctx.key, ctx.low, ctx.low + 9)
-        upper = _stack(chord, ctx.key, b.transpose_chromatic(7), max(3, n - 1),
-                       ctx.hand_span + 4)
-        for i, (t, d) in enumerate(steps):
-            c2 = ctx.timeline.at(t)
-            if c2 is not chord:
-                chord = c2
-                b = _bass(chord, ctx.key, ctx.low, ctx.low + 9)
-                upper = _stack(chord, ctx.key, b.transpose_chromatic(7),
-                               max(3, n - 1), ctx.hand_span + 4)
-            if i == 0:
-                out.append(ctx.note([b], d))
-            else:
-                out.append(ctx.note([upper[(i - 1) % len(upper)]], d))
-    return out
 
+    def pick(chord, step, count, bass):
+        if step == 0:
+            return [bass]
+        upper = _stack(chord, ctx.key, bass.transpose_chromatic(7),
+                       max(3, count - 1), ctx.hand_span + 4)
+        return [upper[(step - 1) % len(upper)]]
+
+    return _figuration(ctx, unit, pick)
 
 def rachmaninoff_wide(ctx: TextureContext) -> list[Note]:
-    """A very wide left hand: deep octave bass then a sweeping arpeggio."""
-    unit = EIGHTH
-    out: list[Note] = []
-    for start, end in _spans_in_bars(ctx):
-        steps = _subdivide(start, end, unit)
-        chord = ctx.timeline.at(start)
-        b = _bass(chord, ctx.key, ctx.low, ctx.low + 8)
-        arp = _stack(chord, ctx.key, b, 6, 26)
-        for i, (t, d) in enumerate(steps):
-            c2 = ctx.timeline.at(t)
-            if c2 is not chord:
-                chord = c2
-                b = _bass(chord, ctx.key, ctx.low, ctx.low + 8)
-                arp = _stack(chord, ctx.key, b, 6, 26)
-            if i == 0:
-                low_oct = [b] if b.midi - 12 < ctx.low - 2 else [b.transpose_chromatic(-12), b]
-                out.append(ctx.note(low_oct, d))
-            else:
-                out.append(ctx.note([arp[(i - 1) % len(arp)]], d))
-    return out
+    """A very wide left hand: a deep octave bass, then a sweeping arpeggio."""
+    def pick(chord, step, count, bass):
+        if step == 0:
+            low = bass.midi - 12
+            if low >= max(21, ctx.low - 2):
+                return [spell_in_chord(low, chord, ctx.key), bass]
+            return [bass]
+        arp = _stack(chord, ctx.key, bass, 6, 26)
+        return [arp[(step - 1) % len(arp)]]
 
+    return _figuration(ctx, EIGHTH, pick)
 
 def arpeggio(ctx: TextureContext) -> list[Note]:
-    """Continuous broken chord — the figuration under a Bach prelude or a study."""
+    """Continuous broken chord — the figuration under a prelude or a study."""
     unit = SIXTEENTH if ctx.density > 0.5 else EIGHTH
-    out: list[Note] = []
-    for start, end in _spans_in_bars(ctx):
-        for t, d in _subdivide(start, end, unit):
-            chord = ctx.timeline.at(t)
-            b = _bass(chord, ctx.key, ctx.low, ctx.low + 12)
-            tones = _stack(chord, ctx.key, b.transpose_chromatic(-1), 5, ctx.high - b.midi + 12)
-            i = ((t - ctx.timeline.start) // unit)
-            n = len(tones)
-            if n == 0:
-                continue
-            k = i % (2 * n - 2) if n > 1 else 0
-            idx = k if k < n else 2 * n - 2 - k
-            out.append(ctx.note([tones[idx]], d))
-    return out
 
+    def pick(chord, step, count, bass):
+        tones = _stack(chord, ctx.key, bass.transpose_chromatic(-1), 5,
+                       max(12, ctx.high - bass.midi + 12))
+        n = len(tones)
+        if n == 1:
+            return [tones[0]]
+        k = step % (2 * n - 2)
+        return [tones[k if k < n else 2 * n - 2 - k]]
+
+    return _figuration(ctx, unit, pick)
 
 def broken_octaves(ctx: TextureContext) -> list[Note]:
-    unit = SIXTEENTH
-    out: list[Note] = []
-    for start, end in _spans_in_bars(ctx):
-        for i, (t, d) in enumerate(_subdivide(start, end, unit)):
-            chord = ctx.timeline.at(t)
-            b = _bass(chord, ctx.key, ctx.low, ctx.low + 12)
-            p = b if i % 2 == 0 else b.transpose_chromatic(12)
-            out.append(ctx.note([p], d))
-    return out
+    def pick(chord, step, count, bass):
+        return [bass if step % 2 == 0
+                else spell_in_chord(bass.midi + 12, chord, ctx.key)]
 
+    return _figuration(ctx, SIXTEENTH, pick)
 
 def octave_bass(ctx: TextureContext) -> list[Note]:
     out: list[Note] = []
     for span in ctx.timeline.spans:
         b = _bass(span.chord, ctx.key, ctx.low, ctx.low + 12)
-        pair = [b.transpose_chromatic(-12), b] if b.midi - 12 >= 21 else [b]
+        pair = ([spell_in_chord(b.midi - 12, span.chord, ctx.key), b]
+            if b.midi - 12 >= 21 else [b])
         for d in split_duration(span.duration,
                                 (span.start - ctx.timeline.start) % ctx.bar_ticks,
                                 ctx.beat_ticks, ctx.bar_ticks):
@@ -268,30 +347,22 @@ def octave_bass(ctx: TextureContext) -> list[Note]:
 
 
 def tremolo(ctx: TextureContext) -> list[Note]:
-    """Alternating dyads — orchestral agitation, Liszt's storm writing."""
-    unit = SIXTEENTH
-    out: list[Note] = []
-    for start, end in _spans_in_bars(ctx):
-        for i, (t, d) in enumerate(_subdivide(start, end, unit)):
-            chord = ctx.timeline.at(t)
-            b = _bass(chord, ctx.key, ctx.low, ctx.low + 12)
-            up = _stack(chord, ctx.key, b, 2, ctx.hand_span)
-            p = [b] if i % 2 == 0 else ([up[-1]] if up else [b])
-            out.append(ctx.note(p, d))
-    return out
+    """Alternating dyads — orchestral agitation, storm writing."""
+    def pick(chord, step, count, bass):
+        up = _stack(chord, ctx.key, bass, 2, ctx.hand_span)
+        return [bass] if step % 2 == 0 else [up[-1] if up else bass]
 
+    return _figuration(ctx, SIXTEENTH, pick)
 
 def repeated_chords(ctx: TextureContext) -> list[Note]:
     """Schubert/Rachmaninoff pulsing chords."""
     unit = EIGHTH if ctx.density < 0.7 else SIXTEENTH
-    out: list[Note] = []
-    for start, end in _spans_in_bars(ctx):
-        for t, d in _subdivide(start, end, unit):
-            chord = ctx.timeline.at(t)
-            b = _bass(chord, ctx.key, ctx.low + 7, ctx.low + 16)
-            out.append(ctx.note(_stack(chord, ctx.key, b, 3, ctx.hand_span), d))
-    return out
 
+    def pick(chord, step, count, bass):
+        top = _bass(chord, ctx.key, ctx.low + 7, ctx.low + 16)
+        return _stack(chord, ctx.key, top, 3, ctx.hand_span) or [top]
+
+    return _figuration(ctx, unit, pick)
 
 def walking_bass(ctx: TextureContext) -> list[Note]:
     """A stepwise bass connecting the roots — continuo and Baroque writing."""
@@ -331,17 +402,13 @@ def pedal_point(ctx: TextureContext) -> list[Note]:
 
 def ostinato(ctx: TextureContext) -> list[Note]:
     """A one-bar figure repeated, re-fitted to each new harmony."""
-    unit = EIGHTH
     shape = ctx.extra.get("ostinato_shape") or [0, 2, 1, 2, 0, 2, 1, 2]
-    out: list[Note] = []
-    for start, end in _spans_in_bars(ctx):
-        for i, (t, d) in enumerate(_subdivide(start, end, unit)):
-            chord = ctx.timeline.at(t)
-            b = _bass(chord, ctx.key, ctx.low, ctx.low + 12)
-            tones = [b] + _stack(chord, ctx.key, b, 3, ctx.hand_span)
-            out.append(ctx.note([tones[shape[i % len(shape)] % len(tones)]], d))
-    return out
 
+    def pick(chord, step, count, bass):
+        tones = [bass] + _stack(chord, ctx.key, bass, 3, ctx.hand_span)
+        return [tones[shape[step % len(shape)] % len(tones)]]
+
+    return _figuration(ctx, EIGHTH, pick)
 
 def chorale(ctx: TextureContext) -> list[Note]:
     """Homophonic block writing that moves with the harmonic rhythm."""

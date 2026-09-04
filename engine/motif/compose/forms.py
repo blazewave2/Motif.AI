@@ -207,16 +207,18 @@ def theme_and_variations(key: Key, style: StyleProfile, rng: random.Random, bars
 
 def prelude(key: Key, style: StyleProfile, rng: random.Random, bars: int):
     a = max(4, round(bars * 0.4 / 2) * 2)
+    b = max(4, round(bars * 0.35 / 2) * 2)
+    # A prelude that runs one figure from beginning to end is an exercise. The
+    # middle sings, and the return brings the figuration back changed.
     return [
         SectionPlan("A", a, str(key), 0.4, "", "auto", "figuration", "half",
                     "state", role="theme"),
-        SectionPlan("B", max(4, round(bars * 0.35 / 2) * 2),
-                    str(key.relative if key.is_minor else key.subdominant_key()),
-                    0.72, "", "auto", "figuration", "half", "sequence",
+        SectionPlan("B", b, str(key.relative if key.is_minor else key.subdominant_key()),
+                    0.72, "", "auto", "melody", "half", "sequence",
                     role="development"),
-        SectionPlan("A'", max(4, bars - a - round(bars * 0.35 / 2) * 2 - 2), str(key),
-                    0.62, "", "auto", "figuration", "perfect_authentic", "recall",
-                    role="recap"),
+        SectionPlan("A'", max(4, bars - a - b - 2), str(key), 0.62, "", "auto",
+                    "figuration" if rng.random() < 0.6 else "chordal",
+                    "perfect_authentic", "recall", role="recap"),
         SectionPlan("coda", 2, str(key), 0.35, "", "sustained", "chordal", "plagal",
                     "fragment", role="coda"),
     ]

@@ -8,7 +8,8 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass
 
-from ..score import DIVISIONS, EIGHTH, HALF, QUARTER, SIXTEENTH, THIRTYSECOND, WHOLE
+from ..score import (DIVISIONS, EIGHTH, HALF, QUARTER, SIXTEENTH, THIRTYSECOND,
+                     Tuplet, WHOLE)
 
 Q, E, S, H, W, T = QUARTER, EIGHTH, SIXTEENTH, HALF, WHOLE, THIRTYSECOND
 DQ, DE, DH = Q + E, E + S, H + Q          # dotted values
@@ -67,6 +68,44 @@ TWO_BEAT_CELLS: list[Cell] = [
     _c(E, E, E, E, w=1.6, label="four-eighths"),
     _c(Q, S, S, E, w=0.9, label="mixed"),
 ]
+
+#: One-bar gestures that identify a dance or a composer immediately. A mazurka
+#: is not a waltz because of its harmony; it is the lean on the second beat.
+SIGNATURE_BARS: dict[str, list[tuple[tuple[int, ...], tuple[int, int]]]] = {
+    "mazurka": [((E, S, S, Q, Q), (3, 4)),          # dotted lean into beat two
+                ((DE, S, Q, Q), (3, 4)),
+                ((Q, E, E, Q), (3, 4))],
+    "waltz": [((DQ, E, Q), (3, 4)), ((H, Q), (3, 4)), ((Q, Q, Q), (3, 4))],
+    "polonaise": [((E, S, S, E, E, E, E), (3, 4)), ((Q, E, E, Q), (3, 4))],
+    "sarabande": [((Q, H), (3, 4)), ((Q, DQ, E), (3, 4))],
+    "siciliano": [((DE, S, E, DE, S, E), (6, 8)), ((Q, E, Q, E), (6, 8))],
+    "gigue": [((E, E, E, E, E, E), (6, 8)), ((Q, E, E, E, E), (6, 8))],
+    "habanera": [((DE, S, E, E), (2, 4))],
+    "march": [((DE, S, Q, DE, S, Q), (4, 4)), ((Q, E, E, Q, Q), (4, 4))],
+    "barcarolle": [((Q, E, Q, E), (6, 8)), ((DQ, DQ), (6, 8))],
+    "scotch_snap": [((S, DE, Q, Q, Q), (4, 4))],
+    "hemiola": [((Q, Q, Q, Q, Q, Q), (3, 4))],
+}
+
+#: Which signatures belong to which style, and how strongly.
+STYLE_SIGNATURES: dict[str, list[tuple[str, float]]] = {
+    "chopin": [("mazurka", 0.30), ("waltz", 0.22), ("barcarolle", 0.10)],
+    "bach": [("gigue", 0.16), ("sarabande", 0.14)],
+    "handel": [("sarabande", 0.22), ("gigue", 0.16)],
+    "scarlatti": [("gigue", 0.14)],
+    "mozart": [("march", 0.10), ("waltz", 0.10)],
+    "haydn": [("march", 0.12)],
+    "beethoven": [("march", 0.16), ("scotch_snap", 0.08)],
+    "schubert": [("waltz", 0.18), ("siciliano", 0.10)],
+    "brahms": [("hemiola", 0.26), ("waltz", 0.12)],
+    "liszt": [("polonaise", 0.14), ("march", 0.12)],
+    "rachmaninoff": [("barcarolle", 0.12), ("march", 0.12)],
+    "tchaikovsky": [("waltz", 0.30), ("march", 0.12)],
+    "grieg": [("waltz", 0.16), ("mazurka", 0.10)],
+    "debussy": [("siciliano", 0.10), ("barcarolle", 0.12)],
+    "satie": [("sarabande", 0.16)],
+}
+
 
 #: Per-style weighting so a Bach line and a Chopin line breathe differently.
 STYLE_RHYTHM_BIAS: dict[str, dict[str, float]] = {
@@ -144,6 +183,54 @@ class RhythmGenerator:
         cells = COMPOUND_BEAT_CELLS if self.is_compound else SIMPLE_BEAT_CELLS
         return list(self._pick(cells).durations)
 
+    # -- signature gestures ----------------------------------------------
+    def signature_bar(self) -> list[int] | None:
+        """A one-bar gesture characteristic of this style, if one fits."""
+        options = STYLE_SIGNATURES.get(self.style)
+        if not options:
+            return None
+        for name, chance in options:
+            if self.rng.random() >= chance:
+                continue
+            for durations, meter in SIGNATURE_BARS.get(name, []):
+                if meter == self.time and sum(durations) == self.bar_ticks:
+                    return list(durations)
+        return None
+
+    def triplet_beat(self) -> list[tuple[int, Tuplet]]:
+        """Three notes in the space of one beat, correctly grouped."""
+        beat = self.beat_ticks
+        each = beat // 3
+        if each * 3 != beat:
+            return []
+        base = "eighth" if each >= SIXTEENTH else "16th"
+        return [(each, Tuplet(3, 2, base, start=(i == 0), stop=(i == 2), number=1))
+                for i in range(3)]
+
+    def bar_events(self, *, cadential: bool = False,
+                   sustain_end: bool = False) -> list[tuple[int, Tuplet | None]]:
+        """One bar as (duration, tuplet) pairs, occasionally in triplets."""
+        sig = None if cadential else self.signature_bar()
+        if sig is not None:
+            return [(d, None) for d in sig]
+
+        # A triplet turn is one of the plainest ways a line stops sounding
+        # metronomic, so it is offered on any beat that can hold one.
+        if (not cadential and not self.is_compound
+                and self.rng.random() < 0.14 + self.density * 0.12):
+            out: list[tuple[int, Tuplet | None]] = []
+            for i in range(self.beats_per_bar):
+                trip = self.triplet_beat()
+                if trip and self.rng.random() < 0.45:
+                    out.extend(trip)
+                else:
+                    out.extend((d, None) for d in self.beat())
+            if out and sum(d for d, _ in out) == self.bar_ticks:
+                return out
+
+        return [(d, None) for d in self.bar(cadential=cadential,
+                                            sustain_end=sustain_end)]
+
     def bar(self, *, cadential: bool = False, sustain_end: bool = False) -> list[int]:
         """One bar of rhythm.  ``cadential`` lengthens the final note."""
         if cadential:
@@ -187,22 +274,30 @@ class RhythmGenerator:
         return head + ([left] if left > 0 else [])
 
     def phrase(self, bars: int, *, cadence_bar: bool = True,
-               anacrusis: int = 0) -> list[list[int]]:
-        """A phrase of rhythm with an internal motivic repeat, bar by bar."""
-        out: list[list[int]] = []
-        seed_bar = self.bar()
+               anacrusis: int = 0) -> list[list[tuple[int, Tuplet | None]]]:
+        """A phrase of rhythm, bar by bar, as (duration, tuplet) pairs.
+
+        The opening bar is the phrase's rhythmic idea; later bars either echo it
+        in varied form or answer it with something new, so the line neither
+        repeats mechanically nor wanders.
+        """
+        out: list[list[tuple[int, Tuplet | None]]] = []
+        seed = self.bar_events()
         for i in range(bars):
             last = i == bars - 1
             if last and cadence_bar:
-                out.append(self.bar(cadential=True))
+                out.append(self.bar_events(cadential=True))
             elif i == 0:
-                out.append(list(seed_bar))
-            elif i % 2 == 0 and self.rng.random() < 0.55:
-                out.append(_vary(list(seed_bar), self.rng))   # motivic echo
+                out.append(list(seed))
+            elif i % 4 == 0 and self.rng.random() < 0.5:
+                out.append(list(seed))                       # restate the idea
+            elif self.rng.random() < 0.42 and not any(t for _, t in seed):
+                plain = _vary([d for d, _ in seed], self.rng)
+                out.append([(d, None) for d in plain])       # varied echo
             else:
-                out.append(self.bar(sustain_end=(i % 4 == 3)))
+                out.append(self.bar_events(sustain_end=(i % 4 == 3)))
         if anacrusis:
-            out.insert(0, self.upbeat(anacrusis))
+            out.insert(0, [(d, None) for d in self.upbeat(anacrusis)])
         return out
 
     def upbeat(self, ticks: int) -> list[int]:

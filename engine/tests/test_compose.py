@@ -124,15 +124,19 @@ def test_textures_fill_their_timeline_and_stay_playable(texture):
     notes = render_texture(texture, ctx)
     assert sum(n.duration for n in notes) == tl.duration
 
-    # No single bar may demand a reach no hand could make.
+    # A hand can only stretch so far at once. A rolled figure may cover three
+    # octaves within a bar, so the reach that matters is per attack, not per bar.
+    for n in notes:
+        if len(n.pitches) > 1:
+            reach = max(p.midi for p in n.pitches) - min(p.midi for p in n.pitches)
+            assert reach <= 24, f"{texture} asks for a {reach}-semitone stretch at once"
     t, bars = 0, {}
     for n in notes:
         if n.pitches:
-            b = t // WHOLE
-            bars.setdefault(b, []).extend(p.midi for p in n.pitches)
+            bars.setdefault(t // WHOLE, []).extend(p.midi for p in n.pitches)
         t += n.duration
     for b, pitches in bars.items():
-        assert max(pitches) - min(pitches) <= 30, f"{texture} bar {b} spans too far"
+        assert max(pitches) - min(pitches) <= 40, f"{texture} bar {b} roams too far"
 
 
 PROMPTS = [

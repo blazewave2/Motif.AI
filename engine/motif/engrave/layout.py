@@ -25,6 +25,19 @@ def place_voice(part: Part, notes: list[Note], *, start_tick: int, bar_ticks: in
             g.voice, g.staff = voice, staff
             m.add(g)
             continue
+        # A tuplet note is already notated by its time-modification; running it
+        # through the beat splitter would shatter a 160-tick triplet into
+        # unnotatable fragments.
+        if note.tuplet is not None:
+            bar_index = t // bar_ticks
+            room = bar_ticks - (t - bar_index * bar_ticks)
+            seg = note.copy()
+            seg.duration = min(note.duration, room)
+            seg.voice, seg.staff = voice, staff
+            part.measure(bar_index + 1).add(seg)
+            t += seg.duration
+            continue
+
         remaining = note.duration
         first = True
         while remaining > 0:
