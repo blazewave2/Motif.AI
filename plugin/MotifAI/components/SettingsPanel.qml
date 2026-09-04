@@ -1,19 +1,22 @@
 // Preferences. Everything here is a musical choice; nothing technical is
 // exposed, because nothing technical is ever the musician's problem.
+//
+// There is no composer picker: Motif reads the composer straight out of what
+// you type — "in the style of Chopin", "a Bach fugue" — so asking is always
+// faster than choosing from a list, and it never goes stale as styles are
+// added.
 import QtQuick 2.15
 
 import "../js/theme.js" as T
 
 Item {
     id: panel
-    property var styleOptions: []
     property var ensembleOptions: []
-    property string styleOverride: ""
     property string ensembleOverride: ""
     property bool autoOpen: true
     property string versionText: ""
     property bool connected: false
-    signal changed(string styleId, string ensembleId, bool openAutomatically)
+    signal changed(string ensembleId, bool openAutomatically)
     signal closed()
 
     implicitHeight: col.implicitHeight
@@ -44,19 +47,6 @@ Item {
         }
 
         Picker {
-            id: stylePicker
-            width: parent.width
-            label: "Composer"
-            placeholder: "Let Motif choose"
-            options: panel.styleOptions
-            value: panel.styleOverride
-            onPicked: function (id) {
-                panel.styleOverride = id;
-                panel.changed(id, panel.ensembleOverride, panel.autoOpen);
-            }
-        }
-
-        Picker {
             id: ensemblePicker
             width: parent.width
             label: "Instruments"
@@ -65,7 +55,7 @@ Item {
             value: panel.ensembleOverride
             onPicked: function (id) {
                 panel.ensembleOverride = id;
-                panel.changed(panel.styleOverride, id, panel.autoOpen);
+                panel.changed(id, panel.autoOpen);
             }
         }
 
@@ -78,7 +68,7 @@ Item {
             checked: panel.autoOpen
             onToggled: function (v) {
                 panel.autoOpen = v;
-                panel.changed(panel.styleOverride, panel.ensembleOverride, v);
+                panel.changed(panel.ensembleOverride, v);
             }
         }
 

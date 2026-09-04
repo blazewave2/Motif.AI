@@ -64,7 +64,8 @@ function plan(base, token, payload, onDone) {
     return request(base, token, "POST", "/plan", payload, onDone);
 }
 
-// The composer and ensemble lists that fill the preference pickers.
+// The instrument list that fills the preferences picker. There is no
+// composer list: the composer always comes from the prompt itself.
 function choices(base, token, onDone) {
     return request(base, token, "GET", "/choices", null, onDone);
 }

@@ -167,11 +167,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"ok": True, "ensembles": [
                 {"id": k, "instruments": v} for k, v in ENSEMBLES.items()]})
         if route == "/choices":
+            # No composer list: the composer is read from the prompt itself,
+            # the same way a musician would ask a person for one.
             return self._json(200, {
                 "ok": True,
-                "styles": [{"id": n, "name": p.display}
-                           for n, p in sorted(STYLES.items(),
-                                              key=lambda kv: kv[1].display)],
                 "ensembles": [{"id": k, "name": ENSEMBLE_NAMES.get(k, k)}
                               for k in ENSEMBLES],
                 "preferences": self.state.cfg.get("preferences", {}),
@@ -210,7 +209,10 @@ class Handler(BaseHTTPRequestHandler):
             prompt=prompt[:4000],
             score_xml=body.get("score_xml") or None,
             seed=body.get("seed"),
-            style=body.get("style") or prefs.get("style") or None,
+            # The composer is never taken from a stored preference — only ever
+            # from what the musician actually typed, or an explicit override
+            # passed by a caller (the CLI's --style flag, for instance).
+            style=body.get("style") or None,
             ensemble=body.get("ensemble") or prefs.get("ensemble") or None,
             history=body.get("history") or [],
             use_model=bool(body.get("use_model", True)))
@@ -246,11 +248,13 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(200, payload)
 
     def _preferences(self, body: dict) -> None:
-        """Remember the musician's choices between sessions."""
+        """Remember the musician's choices between sessions.
+
+        There is deliberately no stored composer preference: the composer
+        comes from the prompt every time, so it can never go stale.
+        """
         prefs = self.state.cfg.setdefault("preferences", {})
-        style = body.get("style")
-        if isinstance(style, str):
-            prefs["style"] = style if style in STYLES else ""
+        prefs.pop("style", None)
         ensemble = body.get("ensemble")
         if isinstance(ensemble, str):
             prefs["ensemble"] = ensemble if ensemble in ENSEMBLES else ""

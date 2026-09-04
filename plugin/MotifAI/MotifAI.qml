@@ -38,10 +38,8 @@ MuseScore {
     property int wakeAttempts: 0
 
     // -- preferences ------------------------------------------------------
-    property string styleOverride: ""
     property string ensembleOverride: ""
     property bool autoOpen: true
-    property var styleOptions: []
     property var ensembleOptions: []
 
     // -- session ----------------------------------------------------------
@@ -105,7 +103,6 @@ MuseScore {
         root.serverUrl = "http://127.0.0.1:" + Api.portFromConfig(raw, 8765);
         var prefs = Api.prefsFromConfig(raw);
         if (prefs) {
-            root.styleOverride = prefs.style || "";
             root.ensembleOverride = prefs.ensemble || "";
             if (prefs.auto_open !== undefined)
                 root.autoOpen = !!prefs.auto_open;
@@ -114,7 +111,6 @@ MuseScore {
 
     function savePreferences() {
         Api.savePrefs(root.serverUrl, root.apiToken, {
-            style: root.styleOverride,
             ensemble: root.ensembleOverride,
             auto_open: root.autoOpen
         }, function (res) { /* preferences are a convenience, never a blocker */ });
@@ -151,15 +147,11 @@ MuseScore {
     }
 
     function loadChoices() {
-        if (root.styleOptions.length > 0)
+        if (root.ensembleOptions.length > 0)
             return;
         Api.choices(root.serverUrl, root.apiToken, function (res) {
             if (!res || res.ok !== true)
                 return;
-            var styles = [{ id: "", name: "Let Motif choose" }];
-            for (var i = 0; i < res.styles.length; ++i)
-                styles.push({ id: res.styles[i].id, name: res.styles[i].name });
-            root.styleOptions = styles;
             var ens = [{ id: "", name: "Let Motif choose" }];
             for (var j = 0; j < res.ensembles.length; ++j)
                 ens.push({ id: res.ensembles[j].id, name: res.ensembles[j].name });
@@ -203,10 +195,12 @@ MuseScore {
             appendMessage("user", promptText, "", false);
         appendMessage("pending", "", "", false);
 
+        // The composer is never a setting — it comes from what you type, the
+        // same way you'd ask a person: "in the style of Chopin", "a Bach
+        // fugue". Only the instrumentation preference can override the
+        // prompt's own reading.
         var payload = { prompt: promptText, seed: nextSeed(),
                         score_xml: currentScoreXml() };
-        if (root.styleOverride.length)
-            payload.style = root.styleOverride;
         if (root.ensembleOverride.length)
             payload.ensemble = root.ensembleOverride;
 
@@ -332,15 +326,12 @@ MuseScore {
             SettingsPanel {
                 id: settings
                 width: parent.width
-                styleOptions: root.styleOptions
                 ensembleOptions: root.ensembleOptions
-                styleOverride: root.styleOverride
                 ensembleOverride: root.ensembleOverride
                 autoOpen: root.autoOpen
                 versionText: root.versionText
                 connected: root.connState === "ready"
-                onChanged: function (styleId, ensembleId, openAutomatically) {
-                    root.styleOverride = styleId;
+                onChanged: function (ensembleId, openAutomatically) {
                     root.ensembleOverride = ensembleId;
                     root.autoOpen = openAutomatically;
                     root.savePreferences();
