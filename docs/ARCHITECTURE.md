@@ -40,7 +40,7 @@ a diminished seventh as D–F–G♯–B instead of D–F–A♭–C♭.
 
 | Module | Responsibility |
 |---|---|
-| `styles.py` | 23 composer profiles: textures, chromaticism rates, dynamic range, registers, hand span, ornament vocabulary |
+| `styles.py` | 23 composer profiles: textures, chromaticism rates, dynamic range, registers, hand span, ornaments, and the scale collections a style colours with — whole-tone and pentatonic for Debussy, octatonic for Scriabin |
 | `forms.py` | 30 formal templates producing a section map — bars, key, energy, texture, cadence, motif operation |
 | `material.py` | Motifs as scale-degree steps, with inversion, retrograde, augmentation, fragmentation, sequence |
 | `progression.py` | Functional progressions coloured with applied dominants, borrowed chords, extensions |
@@ -48,7 +48,8 @@ a diminished seventh as D–F–G♯–B instead of D–F–A♭–C♭.
 | `melody.py` | Structural skeleton over a registral contour, then a scored fill |
 | `textures.py` | 20 accompaniment idioms, each constrained to a playable hand span |
 | `orchestration.py` | Role-based distribution across 13 ensembles |
-| `composer.py` | Assembles all of it, adds dynamics, pedalling, slurs, articulation |
+| `composer.py` | Assembles all of it, adds pedalling, slurs, articulation |
+| `expression.py` | The performance layer: tempo map, per-note velocity, phrase hairpins |
 
 ### `agent/`
 
@@ -64,6 +65,33 @@ create, continue, develop, harmonize, edit, analyze.
 `tokenizer.py` is stdlib-only and shared with training. `runtime.py` imports
 torch lazily and degrades to `None` on any failure, so a missing or broken
 checkpoint never stops the engine composing.
+
+## The performance layer
+
+Notes alone play back like a typewriter. `expression.py` runs after the music
+exists and shapes three things a performer shapes:
+
+**Tempo.** Phrases ease into their cadences, developments press forward, and
+the piece slows at its close, written as real marks — *poco rit.*, *a tempo*,
+*stringendo*, *rall.* How much give a style takes is a per-composer constant:
+Bach 0.03, Chopin 0.20, Liszt 0.22. A Rachmaninov concerto ends up with a
+tempo change roughly every five bars, ranging from 52 to 92; a Bach fugue gets
+its opening tempo and a closing *rit.*, and nothing else.
+
+**Volume.** Every note's velocity comes from where it sits in its phrase, how
+high it is, where the beat falls, how long it is, and what is marked on it,
+plus a little unevenness. Stepping between eight printed marks is what makes
+playback sound typed. The melody is voiced above the accompaniment by a fixed
+offset, which is how a pianist balances the hands.
+
+**Rhythm.** Accompaniment figures vary bar to bar — resting on the last beat,
+holding through, halving their motion, taking a dotted lilt, grouping 3+3+2,
+or turning over in triplets. Before this, one Rachmaninov prelude used the
+same bar-rhythm thirty-eight times out of forty.
+
+Phrases are detected from slur ends, but *merged* into period-length spans:
+shaping every slur would put a hairpin under every bar, which is the opposite
+of phrasing.
 
 ## Design decisions worth knowing
 

@@ -23,6 +23,9 @@ from .material import Contour, Motif
 class MelodyStyle:
     """Knobs the style profiles turn to colour a line."""
 
+    colours: tuple[str, ...] = ()      # extra scale collections to draw on
+    colour_rate: float = 0.0
+
     leap_tolerance: float = 1.0        # >1 permits wider leaps
     chromaticism: float = 0.08         # chance of a chromatic approach note
     ornament_rate: float = 0.08
@@ -59,6 +62,7 @@ class MelodyWriter:
         self.style = style or MelodyStyle()
         self.scale_variant = scale_variant or (
             "harmonic_minor" if key.is_minor else None)
+        self._colour: set[int] | None = None
 
     # -- scale helpers ----------------------------------------------------
     def _scale_pcs(self, chord: Chord) -> set[int]:
@@ -67,7 +71,32 @@ class MelodyWriter:
             pcs |= set(self.key.scale_pcs_for("harmonic_minor"))
             pcs |= set(self.key.scale_pcs_for("melodic_minor"))
         pcs |= set(chord.pcs)          # applied chords bring their own colour
+        if self._colour is not None:
+            pcs |= self._colour
         return pcs
+
+    def recolour(self) -> None:
+        """Pick the scale collection colouring the next phrase.
+
+        A whole-tone or pentatonic phrase is what separates Debussy from a
+        major scale with added ninths; the collection is chosen per phrase so
+        the colour shifts rather than saturating the whole piece.
+        """
+        self._colour = None
+        colours = self.style.colours
+        if not colours or self.rng.random() >= self.style.colour_rate:
+            return
+        name = self.rng.choice(list(colours))
+        # Transpose the collection onto a chord tone, not always the tonic, so
+        # the colour floats the way it does in the repertoire.
+        roots = [self.key.tonic_pc]
+        roots += [(self.key.tonic_pc + i) % 12 for i in (5, 7)]
+        root = self.rng.choice(roots)
+        from ..theory.pitch import SCALE_INTERVALS
+        intervals = SCALE_INTERVALS.get(name)
+        if not intervals:
+            return
+        self._colour = {(root + i) % 12 for i in intervals}
 
     def _candidates(self, prev: Pitch | None, chord: Chord, lo: int, hi: int) -> list[Pitch]:
         pcs = self._scale_pcs(chord)

@@ -181,12 +181,14 @@ class Composer:
         bars = rg.phrase(sec.bars, cadence_bar=True)
         rhythm = flatten_rhythm(bars, timeline.start)
 
-        ms = replace(style.melody)
+        ms = replace(style.melody, colours=self.style.scale_colours,
+                     colour_rate=self.style.colour_rate)
         shift = sec.register * 12
         ms.range_low = max(21, ms.range_low + shift)
         ms.range_high = min(108, ms.range_high + shift)
 
         writer = MelodyWriter(self.rng, key, ms)
+        writer.recolour()
         contour_name = ("rising" if sec.role in ("transition", "cadenza")
                         else "descending" if sec.role == "coda"
                         else "wave" if sec.energy > 0.75 else "arch")

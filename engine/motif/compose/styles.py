@@ -60,6 +60,12 @@ class StyleProfile:
     lh_range: tuple[int, int] = (33, 64)
     hand_span: int = 14
 
+    #: Extra scale collections the melody may colour with. Whole-tone and
+    #: pentatonic writing is what makes Debussy sound like Debussy; a profile
+    #: that only knows major and minor cannot get there from harmony alone.
+    scale_colours: tuple[str, ...] = ()
+    colour_rate: float = 0.0        # how often a phrase takes on that colour
+
     keywords: tuple[str, ...] = ()
 
     def with_energy(self, energy: float) -> "StyleProfile":
@@ -197,6 +203,7 @@ _add(StyleProfile(
     tempo_terms=("Lento", "Andante", "Larghetto", "Allegro", "Vivace",
                  "Andante spianato", "Moderato"),
     rh_range=(55, 96), lh_range=(28, 64), hand_span=15,
+    scale_colours=("harmonic_minor",), colour_rate=0.12,
     keywords=("chopin", "nocturne", "romantic", "lyrical", "cantabile", "rubato",
               "mazurka", "waltz", "ballade", "poetic", "singing")))
 
@@ -222,6 +229,7 @@ _add(StyleProfile(
     tempo_terms=("Allegro agitato", "Lento assai", "Vivace", "Presto con fuoco",
                  "Andante lagrimoso", "Allegro maestoso"),
     rh_range=(45, 104), lh_range=(21, 67), hand_span=17,
+    scale_colours=("hungarian_minor", "octatonic"), colour_rate=0.18,
     keywords=("liszt", "virtuoso", "rhapsody", "transcendental", "octaves",
               "bravura", "cadenza", "fireworks", "dazzling")))
 
@@ -249,6 +257,7 @@ _add(StyleProfile(
     tempo_terms=("Lento", "Moderato", "Allegro agitato", "Andante", "Adagio sostenuto",
                  "Allegro ma non tanto", "Non allegro"),
     rh_range=(48, 96), lh_range=(21, 62), hand_span=19,
+    scale_colours=("harmonic_minor", "phrygian"), colour_rate=0.15,
     keywords=("rachmaninoff", "rachmaninov", "dark", "brooding", "sweeping", "lush",
               "russian", "romantic", "concerto", "bells", "elegiac", "melancholy")))
 
@@ -271,6 +280,7 @@ _add(StyleProfile(
     rubato_terms=("misterioso", "languido", "estatico", "imperioso", "con luminosità"),
     tempo_terms=("Andante", "Allegro fantastico", "Lento", "Presto", "Allegro drammatico"),
     rh_range=(50, 100), lh_range=(24, 64), hand_span=16,
+    scale_colours=("octatonic", "whole_tone"), colour_rate=0.45,
     keywords=("scriabin", "mystic", "ecstatic", "chromatic", "quartal", "visionary",
               "poem", "trance")))
 
@@ -340,6 +350,7 @@ _add(StyleProfile(
     lh_textures=("block_chords", "arpeggio", "drone", "waltz"),
     melody=_m(step_preference=1.3, range_low=55, range_high=88),
     tempo_terms=("Allegretto", "Andante", "Poco allegro"),
+    scale_colours=("dorian", "mixolydian", "pentatonic_minor"), colour_rate=0.35,
     keywords=("grieg", "nordic", "folk", "lyric piece", "norwegian")))
 
 # --- Impressionist / modern -----------------------------------------------
@@ -362,10 +373,14 @@ _add(StyleProfile(
     rubato_terms=("doux et expressif", "en cédant", "lumineux", "très calme", "rubato"),
     tempo_terms=("Modéré", "Lent", "Andantino", "Très modéré", "Doucement expressif"),
     rh_range=(52, 100), lh_range=(24, 64), hand_span=15,
+    scale_colours=("whole_tone", "pentatonic_major", "lydian",
+                   "mixolydian", "acoustic"), colour_rate=0.55,
     keywords=("debussy", "impressionist", "whole tone", "dreamy", "water", "atmospheric",
               "floating", "misty", "pentatonic")))
 
 _add(replace(STYLES["debussy"], name="ravel", display="Ravel",
+             scale_colours=("whole_tone", "acoustic", "lydian", "phrygian"),
+             colour_rate=0.45,
              chromaticism=0.38, extension_rate=0.6, rhythm_density=0.55,
              forms=("prelude", "ternary", "pavane", "waltz"),
              tempo_terms=("Assez lent", "Modéré", "Vif", "Lent"),
@@ -385,6 +400,7 @@ _add(StyleProfile(
     dynamic_range=("ppp", "mp"), dynamic_volatility=0.2,
     rubato_terms=("lent et douloureux", "avec étonnement"),
     tempo_terms=("Lent", "Lent et douloureux", "Modéré"),
+    scale_colours=("dorian", "lydian", "pentatonic_major"), colour_rate=0.3,
     keywords=("satie", "gymnopedie", "minimal", "sparse", "calm", "ambient", "simple")))
 
 _add(StyleProfile(
@@ -402,6 +418,7 @@ _add(StyleProfile(
     articulation_rate=0.05, pedal="long",
     dynamic_range=("pp", "mf"), dynamic_volatility=0.35,
     tempo_terms=("Andante", "Moderato", "Calmo"),
+    scale_colours=("dorian", "aeolian", "pentatonic_minor"), colour_rate=0.35,
     keywords=("minimal", "modern", "cinematic", "ambient", "einaudi", "contemplative",
               "meditative", "film", "soundtrack", "peaceful", "calm")))
 
@@ -418,6 +435,7 @@ _add(StyleProfile(
     rhythm_density=0.45, pedal="long",
     dynamic_range=("pp", "fff"), dynamic_volatility=0.8,
     tempo_terms=("Andante", "Moderato", "Adagio", "Allegro"),
+    scale_colours=("dorian", "aeolian", "lydian"), colour_rate=0.3,
     keywords=("film", "score", "cinematic", "epic", "trailer", "soundtrack",
               "mysterious", "forest", "scene", "atmosphere", "underscore")))
 
