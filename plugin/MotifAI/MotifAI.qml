@@ -38,9 +38,9 @@ MuseScore {
     property int wakeAttempts: 0
 
     // -- preferences ------------------------------------------------------
-    property string ensembleOverride: ""
+    // There is only ever one: whether a new score opens by itself. Composer
+    // and instrumentation are never settings — see the prompt box.
     property bool autoOpen: true
-    property var ensembleOptions: []
 
     // -- session ----------------------------------------------------------
     property bool busy: false
@@ -64,6 +64,8 @@ MuseScore {
           prompt: "Write a short film score for a mysterious forest scene" },
         { l1: "Continue this piece",              l2: "in a more dramatic way",
           prompt: "Continue this piece in a more dramatic way" },
+        { l1: "Continue writing",                 l2: "in the same style",
+          prompt: "Continue in the same style" },
         { l1: "Add a contrasting middle section", l2: "in a minor key",
           prompt: "Add a contrasting middle section in a minor key" }
     ]
@@ -102,16 +104,12 @@ MuseScore {
             root.apiToken = tok;
         root.serverUrl = "http://127.0.0.1:" + Api.portFromConfig(raw, 8765);
         var prefs = Api.prefsFromConfig(raw);
-        if (prefs) {
-            root.ensembleOverride = prefs.ensemble || "";
-            if (prefs.auto_open !== undefined)
-                root.autoOpen = !!prefs.auto_open;
-        }
+        if (prefs && prefs.auto_open !== undefined)
+            root.autoOpen = !!prefs.auto_open;
     }
 
     function savePreferences() {
         Api.savePrefs(root.serverUrl, root.apiToken, {
-            ensemble: root.ensembleOverride,
             auto_open: root.autoOpen
         }, function (res) { /* preferences are a convenience, never a blocker */ });
     }
@@ -133,7 +131,6 @@ MuseScore {
                 root.connState = "ready";
                 root.wakeAttempts = 0;
                 root.versionText = "Version " + res.version;
-                loadChoices();
                 return;
             }
             root.wakeAttempts += 1;
@@ -143,19 +140,6 @@ MuseScore {
             } else {
                 root.connState = "offline";
             }
-        });
-    }
-
-    function loadChoices() {
-        if (root.ensembleOptions.length > 0)
-            return;
-        Api.choices(root.serverUrl, root.apiToken, function (res) {
-            if (!res || res.ok !== true)
-                return;
-            var ens = [{ id: "", name: "Let Motif choose" }];
-            for (var j = 0; j < res.ensembles.length; ++j)
-                ens.push({ id: res.ensembles[j].id, name: res.ensembles[j].name });
-            root.ensembleOptions = ens;
         });
     }
 
@@ -195,14 +179,13 @@ MuseScore {
             appendMessage("user", promptText, "", false);
         appendMessage("pending", "", "", false);
 
-        // The composer is never a setting — it comes from what you type, the
-        // same way you'd ask a person: "in the style of Chopin", "a Bach
-        // fugue". Only the instrumentation preference can override the
-        // prompt's own reading.
+        // Neither the composer nor the instrumentation is ever a setting —
+        // both come from what you type, the same way you'd ask a person:
+        // "in the style of Chopin", "for a string quartet", "continue in the
+        // same style". When a score is open and you don't name different
+        // forces, Motif keeps whatever is already playing.
         var payload = { prompt: promptText, seed: nextSeed(),
                         score_xml: currentScoreXml() };
-        if (root.ensembleOverride.length)
-            payload.ensemble = root.ensembleOverride;
 
         Api.compose(root.serverUrl, root.apiToken, payload, function (res) {
             root.busy = false;
@@ -326,13 +309,10 @@ MuseScore {
             SettingsPanel {
                 id: settings
                 width: parent.width
-                ensembleOptions: root.ensembleOptions
-                ensembleOverride: root.ensembleOverride
                 autoOpen: root.autoOpen
                 versionText: root.versionText
                 connected: root.connState === "ready"
-                onChanged: function (ensembleId, openAutomatically) {
-                    root.ensembleOverride = ensembleId;
+                onChanged: function (openAutomatically) {
                     root.autoOpen = openAutomatically;
                     root.savePreferences();
                 }

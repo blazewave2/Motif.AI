@@ -1,22 +1,20 @@
-// Preferences. Everything here is a musical choice; nothing technical is
-// exposed, because nothing technical is ever the musician's problem.
+// Preferences. There is deliberately very little here.
 //
-// There is no composer picker: Motif reads the composer straight out of what
-// you type — "in the style of Chopin", "a Bach fugue" — so asking is always
-// faster than choosing from a list, and it never goes stale as styles are
-// added.
+// Neither the composer nor the instrumentation is chosen from a list: both
+// come straight out of what you type — "in the style of Chopin", "for a
+// string quartet", "continue in the same style" — because a picker can only
+// ever offer a fixed set of choices, and asking is always more flexible than
+// choosing from a menu that will always be missing something.
 import QtQuick 2.15
 
 import "../js/theme.js" as T
 
 Item {
     id: panel
-    property var ensembleOptions: []
-    property string ensembleOverride: ""
     property bool autoOpen: true
     property string versionText: ""
     property bool connected: false
-    signal changed(string ensembleId, bool openAutomatically)
+    signal changed(bool openAutomatically)
     signal closed()
 
     implicitHeight: col.implicitHeight
@@ -46,21 +44,6 @@ Item {
             }
         }
 
-        Picker {
-            id: ensemblePicker
-            width: parent.width
-            label: "Instruments"
-            placeholder: "Let Motif choose"
-            options: panel.ensembleOptions
-            value: panel.ensembleOverride
-            onPicked: function (id) {
-                panel.ensembleOverride = id;
-                panel.changed(id, panel.autoOpen);
-            }
-        }
-
-        Rectangle { width: parent.width; height: 1; color: T.border }
-
         Toggle {
             width: parent.width
             label: "Open new scores automatically"
@@ -68,7 +51,7 @@ Item {
             checked: panel.autoOpen
             onToggled: function (v) {
                 panel.autoOpen = v;
-                panel.changed(panel.ensembleOverride, v);
+                panel.changed(v);
             }
         }
 

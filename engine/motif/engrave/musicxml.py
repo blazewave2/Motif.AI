@@ -103,11 +103,24 @@ class MusicXMLWriter:
                        f'element="{feature}" type="yes"' if feature != "print"
                        else 'element="print" attribute="new-system" type="yes" value="yes"')
         self._close("encoding")
-        if s.metadata.get("prompt"):
+        # Provenance fields, so a later request can read back exactly what
+        # generated this score — its composer, form and forces — instead of
+        # having to guess from the notes alone. Every field is optional and
+        # a plain miscellaneous-field, so any MusicXML reader (MuseScore
+        # included) that does not know about them simply ignores them.
+        misc = [
+            ("motif-prompt", s.metadata.get("prompt")),
+            ("motif-style", s.metadata.get("style")),
+            ("motif-form", s.metadata.get("form")),
+            ("motif-ensemble", s.metadata.get("ensemble")),
+            ("motif-character", s.metadata.get("character")),
+            ("motif-seed", s.metadata.get("seed")),
+        ]
+        misc = [(name, value) for name, value in misc if value not in (None, "")]
+        if misc:
             self._open("miscellaneous")
-            self._leaf("miscellaneous-field", s.metadata["prompt"], 'name="motif-prompt"')
-            if s.metadata.get("plan_id"):
-                self._leaf("miscellaneous-field", s.metadata["plan_id"], 'name="motif-plan"')
+            for name, value in misc:
+                self._leaf("miscellaneous-field", value, f'name="{name}"')
             self._close("miscellaneous")
         self._close("identification")
 

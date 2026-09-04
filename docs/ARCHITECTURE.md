@@ -60,6 +60,20 @@ revision, and **validates every field it gets back** against the allowed sets;
 anything unrecognised falls back to the draft. `agent.py` routes six intents:
 create, continue, develop, harmonize, edit, analyze.
 
+Neither the composer nor the instrumentation is ever a stored setting — both
+come from the prompt on every request. "Continue in the same style" is
+resolved two ways, in order: the exact style, ensemble and instrumentation
+Motif itself recorded when it wrote the score (see "Provenance survives the
+round trip" below) when that survives, and a note-based heuristic (chromaticism,
+polyphony, ornament rate, register, tempo) when it does not — a hand-written
+score, say, or one edited enough that re-guessing is worth it. Continuing or
+developing a piece rebuilds the instrument list from what is actually on the
+page (`_instruments_from_score`, matched by name and General MIDI program) so
+a concerto stays a concerto; naming different or larger forces in the request
+("continue this for a string quartet") is still honoured, and the merge adds
+the new parts silent for what was already written rather than pasting one
+instrument's line under another's name.
+
 ### `model/`
 
 `tokenizer.py` is stdlib-only and shared with training. `runtime.py` imports
@@ -111,6 +125,17 @@ final pass folds any note outside the instrument's range back into it.
 **Seeds are reproducible.** The same prompt and seed produce a byte-identical
 score; a different seed produces different music. "Try again" in the panel is
 simply a new seed.
+
+**Provenance survives the round trip.** `musicxml.py` writes the composer,
+form, ensemble, seed and character Motif used as plain
+`<miscellaneous-field>` entries under `<identification>` — standard MusicXML
+that any reader, MuseScore included, is free to ignore. `musicxml_reader.py`
+reads them back into `Score.metadata`, and `analysis.py` prefers them outright
+over its own note-based guess. This is what makes "continue in the same
+style" exact rather than approximate, for as long as the metadata survives
+whatever the score passed through; the heuristic in `detect_style` is the
+fallback for everything else — a score never touched by Motif, or one edited
+enough that guessing again is worth it.
 
 ## Setup and lifetime
 

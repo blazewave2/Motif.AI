@@ -66,3 +66,26 @@ def test_the_interface_never_mentions_a_command_line():
             if word in text:
                 offenders.append(f"{path.name}: {word!r}")
     assert not offenders, "technical language reached the musician: " + ", ".join(offenders)
+
+
+def test_preferences_has_no_composer_or_instrument_picker():
+    """The panel must never let you choose a composer or ensemble from a
+    list — both come only from what is typed into the prompt.
+
+    Explaining that design choice in a code comment is fine (and the
+    SettingsPanel docstring does); what must not exist is an actual control
+    for it — a labelled picker, or the properties that would wire one up.
+    """
+    root = Path(__file__).resolve().parents[2] / "plugin" / "MotifAI"
+    settings = (root / "components" / "SettingsPanel.qml").read_text()
+    lowered = settings.lower()
+    for banned in ('label: "composer"', 'label: "instruments"', "styleoverride",
+                  "ensembleoverride", "styleoptions", "ensembleoptions",
+                  "picker {"):
+        assert banned not in lowered, f"Preferences still has {banned!r}"
+    # A picker component that nothing uses any more should not ship either.
+    assert not (root / "components" / "Picker.qml").exists()
+    main = (root / "MotifAI.qml").read_text().lower()
+    for banned in ("styleoverride", "ensembleoverride", "styleoptions",
+                  "ensembleoptions", "loadchoices"):
+        assert banned not in main, f"MotifAI.qml still references {banned!r}"

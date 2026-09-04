@@ -9,7 +9,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 
-from ..score import (EIGHTH, HALF, Note, QUARTER, SIXTEENTH, THIRTYSECOND, Tuplet,
+from ..score import (EIGHTH, Note, QUARTER, SIXTEENTH, THIRTYSECOND, Tuplet,
                      WHOLE, split_duration)
 from ..theory.harmony import Chord
 from ..theory.pitch import Key, Pitch

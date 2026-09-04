@@ -112,6 +112,15 @@ def test_every_ensemble_composes(ensemble):
                     for p in n.pitches:
                         assert ip.range_low <= p.midi <= ip.range_high, \
                             f"{ip.name} cannot play {p}"
+        # A bass-register instrument (cello, contrabass, bassoon, trombone)
+        # cannot sound three or more notes at once; at most a root-and-octave
+        # doubling is idiomatic.
+        if ip.role == "bass":
+            for m in part.measures:
+                for notes in m.voices.values():
+                    for n in notes:
+                        assert len(n.pitches) <= 2, \
+                            f"{ip.name} was written a {len(n.pitches)}-note chord"
 
 
 @pytest.mark.parametrize("texture", sorted(TEXTURES))

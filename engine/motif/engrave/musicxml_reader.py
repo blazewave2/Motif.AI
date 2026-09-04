@@ -32,6 +32,7 @@ def read_musicxml(data: str | bytes) -> Score:
     score.title = _text(root, "work/work-title") or _credit_title(root) or "Untitled"
     score.subtitle = _text(root, "movement-title") or ""
     score.composer = _creator(root, "composer") or "Unknown"
+    score.metadata.update(_read_motif_metadata(root))
 
     names = {}
     for sp in root.findall("part-list/score-part"):
@@ -217,6 +218,29 @@ def _unzip_mxl(data: bytes) -> str:
                 raise ValueError("no MusicXML inside the .mxl container")
             target = names[0]
         return z.read(target).decode("utf-8", errors="replace")
+
+
+def _read_motif_metadata(root) -> dict:
+    """Recover Motif's own provenance fields, when this score carries them.
+
+    Written by ``musicxml.py`` as plain ``<miscellaneous-field>`` entries, so
+    they survive in any MusicXML file Motif itself produced and are silently
+    absent from anything else (a hand-written score, or one from another
+    application) — which is exactly the fallback behaviour that is wanted:
+    read back the exact composer and forces when they are known, and let the
+    heuristic analysis take over when they are not.
+    """
+    out: dict = {}
+    for field in root.findall("identification/miscellaneous/miscellaneous-field"):
+        name = field.get("name") or ""
+        if name.startswith("motif-") and field.text:
+            out[name[len("motif-"):]] = field.text.strip()
+    if "seed" in out:
+        try:
+            out["seed"] = int(out["seed"])
+        except ValueError:
+            del out["seed"]
+    return out
 
 
 def _text(root, path: str) -> str:

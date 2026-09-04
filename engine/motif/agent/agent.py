@@ -11,23 +11,29 @@ from dataclasses import dataclass, field
 
 from ..compose.composer import compose
 from ..compose.forms import build_sections
-from ..compose.orchestration import build_instruments
+from ..compose.orchestration import INSTRUMENTS, build_instruments
 from ..compose.styles import resolve_style
 from ..engrave.midi import to_midi
 from ..engrave.musicxml import to_musicxml
 from ..engrave.musicxml_reader import read_musicxml
 from ..engrave.preview import summarise
-from ..plan import CompositionPlan, SectionPlan
-from ..score import Score
+from ..plan import CompositionPlan, InstrumentPlan, SectionPlan
+from ..score import Part, Score
 from ..theory.pitch import Key
 from .analysis import ScoreAnalysis, analyse
-from .prompt_parser import parse_prompt, parse_key
+from .prompt_parser import ENSEMBLE_WORDS, parse_prompt, parse_key
+from .prompt_parser import _detect as _detect_ensemble
 
 INTENTS = ("create", "continue", "develop", "harmonize", "edit", "analyze")
 
-_CONTINUE_WORDS = ("continue", "carry on", "keep going", "extend", "add more",
-                   "what comes next", "next section", "go on", "more of this",
-                   "finish this", "complete this", "another", "add a", "add an")
+_CONTINUE_WORDS = ("continue", "carry on", "keep going", "keep writing",
+                   "keep composing", "extend", "add more", "what comes next",
+                   "next section", "go on", "more of this", "finish this",
+                   "complete this", "another", "add a", "add an",
+                   "same style", "same voice", "match this style",
+                   "match my style", "matching style", "in the same vein",
+                   "in this same style", "picks up where", "pick up where",
+                   "consistent with this", "keep it in the same")
 _DEVELOP_WORDS = ("develop", "vary", "variation", "elaborate", "expand on",
                   "build on", "take this", "rework", "reimagine")
 _HARMONIZE_WORDS = ("harmonize", "harmonise", "add accompaniment", "accompany",
@@ -153,7 +159,8 @@ class MotifAgent:
         """Add new music that follows on from what is already written."""
         plan = self._plan_for(req)
         # The existing score wins on every musical parameter the user did not
-        # explicitly override; continuing in a different key is not continuing.
+        # explicitly override; continuing in a different key is not continuing,
+        # and continuing a concerto is not continuing it as a solo piano line.
         stated_tonic, stated_mode = parse_key(req.prompt.lower(), req.prompt)
         if not stated_tonic:
             plan.key = str(info.key)
@@ -163,6 +170,10 @@ class MotifAgent:
         if not any(s in req.prompt.lower() for s in ("style of", "like ", "in the manner")):
             plan.style = info.detected_style
         style = resolve_style(plan.style)
+        if not req.ensemble and not _ensemble_named_in(req.prompt):
+            plan.instruments = _instruments_from_score(existing)
+            if info.ensemble:
+                plan.ensemble = info.ensemble
 
         bars = plan.total_bars or 16
         key = Key.parse(plan.key)
@@ -181,9 +192,10 @@ class MotifAgent:
         result.musicxml = to_musicxml(merged)
         result.midi = to_midi(merged)
         result.preview = summarise(merged)
+        style_note = " in the same style" if info.style_is_exact else ""
         result.message = (f"Continued **{existing.title}** with {bars} new bars in "
                           f"{plan.key}, following the existing {info.time[0]}/"
-                          f"{info.time[1]} at ♩ = {int(plan.tempo)}. "
+                          f"{info.time[1]} at ♩ = {int(plan.tempo)}{style_note}. "
                           f"The new material develops the closing idea.")
         return result
 
@@ -193,6 +205,14 @@ class MotifAgent:
         if not stated_tonic:
             plan.key = str(info.key)
         plan.time = info.time
+        # Same guard as continuing: a style or ensemble named in the request
+        # wins, otherwise the piece already open decides both.
+        if not any(s in req.prompt.lower() for s in ("style of", "like ", "in the manner")):
+            plan.style = info.detected_style
+        if not req.ensemble and not _ensemble_named_in(req.prompt):
+            plan.instruments = _instruments_from_score(existing)
+            if info.ensemble:
+                plan.ensemble = info.ensemble
         for s in plan.sections:
             s.motif_op = "develop" if s.motif_op == "state" else s.motif_op
             s.energy = min(1.0, s.energy + 0.12)
@@ -292,26 +312,160 @@ class MotifAgent:
 
 
 # ---------------------------------------------------------------------------
+# matching the instrumentation already on the page
+# ---------------------------------------------------------------------------
+def _ensemble_named_in(prompt: str) -> str | None:
+    """Whether the request itself names an ensemble or instrumentation.
+
+    Distinguishes "continue this for string quartet instead" from a plain
+    "continue this piece" — only the former should change what is playing.
+    """
+    return _detect_ensemble(prompt.lower(), ENSEMBLE_WORDS)
+
+
+def _instruments_from_score(score: Score) -> list[InstrumentPlan]:
+    """Rebuild an instrument list that matches what is already on the page.
+
+    "The same style" has to mean the same forces too: continuing a concerto
+    is not continuing it as a solo piano line. Each part is matched back to
+    the General MIDI instrument it was written for, which recovers a proper
+    playable range and role even though that information is not itself
+    stored in MusicXML; a part that cannot be matched falls back to its own
+    observed range instead of a guess that could sit outside it.
+    """
+    plans: list[InstrumentPlan] = []
+    solo = len(score.parts) == 1
+    for part in score.parts:
+        spec = _instrument_spec_for(part)
+        clefs = [part.clefs.get(i + 1, "G") for i in range(max(1, part.staves))]
+        if spec:
+            plans.append(InstrumentPlan(
+                name=part.name, abbreviation=part.abbreviation or part.name[:4],
+                midi_program=part.midi_program, staves=max(1, part.staves),
+                clefs=clefs, role=spec["role"],
+                range_low=spec["low"], range_high=spec["high"]))
+        else:
+            lo, hi = _observed_range(part)
+            plans.append(InstrumentPlan(
+                name=part.name, abbreviation=part.abbreviation or part.name[:4],
+                midi_program=part.midi_program, staves=max(1, part.staves),
+                clefs=clefs, role="solo" if solo else "harmony",
+                range_low=max(21, lo - 3), range_high=min(108, hi + 3)))
+    return plans
+
+
+def _instrument_spec_for(part: Part) -> dict | None:
+    """Look an existing part up in the General MIDI instrument table."""
+    key = part.name.strip().lower().replace(" ", "_").replace(".", "")
+    aliases = {"violin_1": "violin_i", "violin_2": "violin_ii",
+               "violoncello": "cello", "double_bass": "contrabass",
+               "string_bass": "contrabass", "horn_in_f": "horn",
+               "french_horn": "horn"}
+    key = aliases.get(key, key)
+    if key in INSTRUMENTS:
+        return INSTRUMENTS[key]
+    for spec in INSTRUMENTS.values():
+        if spec["program"] == part.midi_program:
+            return spec
+    return None
+
+
+def _observed_range(part: Part) -> tuple[int, int]:
+    lo = hi = None
+    for m in part.measures:
+        for notes in m.voices.values():
+            for n in notes:
+                for p in n.pitches:
+                    lo = p.midi if lo is None else min(lo, p.midi)
+                    hi = p.midi if hi is None else max(hi, p.midi)
+    return (lo, hi) if lo is not None else (48, 84)
+
+
+# ---------------------------------------------------------------------------
 # score surgery
 # ---------------------------------------------------------------------------
 def _append_scores(base: Score, addition: Score) -> Score:
-    """Concatenate ``addition`` after ``base``, matching part counts."""
+    """Concatenate ``addition`` after ``base``.
+
+    Parts are matched by instrument identity (name and General MIDI program),
+    not by position — a positional match is only correct when the
+    instrumentation has not changed, and pastes one instrument's line under
+    another's name the moment it has. In the ordinary case (continuing with
+    the same forces) every part finds its match and this is a plain append.
+
+    When a continuation is explicitly asked for with different or larger
+    forces, an unmatched base part falls silent from here on (it is not part
+    of what continues), and an unmatched addition part is added as a new
+    part, silent for everything already written, carrying the new material
+    from where it enters — a real, legible instrumentation change, not a
+    smear of mismatched material into the wrong staff.
+    """
     offset = base.measure_count
-    for i, part in enumerate(base.parts):
-        src = addition.parts[i] if i < len(addition.parts) else addition.parts[0]
-        for m in src.measures:
-            copy = _copy_measure(m)
-            copy.number = offset + m.number
-            if m.number == 1:
-                copy.key = m.key
-            part.measures.append(copy)
+    new_bars = addition.measure_count
+    used: set[int] = set()
+
+    for part in base.parts:
+        match = _find_matching_part(part, addition.parts, used)
+        if match is not None:
+            used.add(match)
+            _copy_measures_into(part, addition.parts[match].measures, offset)
+        else:
+            _pad_with_silence(part, base.time, len(part.measures), new_bars)
         if part.measures:
             part.measures[-1].barline = "light-heavy"
+
+    for i, extra in enumerate(addition.parts):
+        if i in used:
+            continue
+        new_part = _new_part_like(extra, len(base.parts))
+        _pad_with_silence(new_part, base.time, 0, offset)
+        _copy_measures_into(new_part, extra.measures, offset)
+        if new_part.measures:
+            new_part.measures[-1].barline = "light-heavy"
+        base.parts.append(new_part)
+
     for tm in addition.tempos:
         if tm.measure > 1:
             base.tempos.append(type(tm)(tm.measure + offset, tm.bpm, tm.beat_unit,
                                         tm.text, tm.dotted))
     return base
+
+
+def _find_matching_part(part: Part, candidates: list[Part], used: set[int]) -> int | None:
+    for i, cand in enumerate(candidates):
+        if i not in used and cand.name == part.name and cand.midi_program == part.midi_program:
+            return i
+    return None
+
+
+def _copy_measures_into(part: Part, measures, offset: int) -> None:
+    for m in measures:
+        copy = _copy_measure(m)
+        copy.number = offset + m.number
+        if m.number == 1:
+            copy.key = m.key
+        part.measures.append(copy)
+
+
+def _pad_with_silence(part: Part, time: tuple[int, int], start: int, count: int) -> None:
+    """Fill ``count`` bars from ``start`` with a full-bar rest in every voice."""
+    from ..engrave.layout import fill_empty_measures
+    from ..score import bar_duration
+    bar_ticks = bar_duration(tuple(time))
+    for n in range(1, count + 1):
+        part.measure(start + n)
+    vs = [(1, 1)] if part.staves == 1 else [(1, 1), (5, 2)]
+    fill_empty_measures(part, bar_ticks, vs)
+
+
+def _new_part_like(src: Part, index: int) -> Part:
+    """A fresh, empty part carrying ``src``'s instrument identity."""
+    import copy as _copy
+    part = _copy.deepcopy(src)
+    part.measures = []
+    part.id = f"P{index + 1}"
+    part.midi_channel = min(16, index + 1)
+    return part
 
 
 def _copy_measure(m):

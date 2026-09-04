@@ -122,8 +122,10 @@ def orchestrate(composer, score: Score, parts: list[Part], sec: SectionPlan,
         elif role == "bass":
             ctx = _ctx(composer, timeline, key, sec, bar_ticks, beat_ticks,
                        low, min(high, low + 30), staff=1, voice=1)
-            name = "octave_bass" if sec.energy > 0.6 else "walking_bass" \
-                if composer.style.era == "baroque" else "sustained"
+            # A single line or a root-and-octave doubling — never the spread
+            # three-note "sustained" chord, which a cello, bassoon or
+            # trombone cannot actually sound at once.
+            name = "walking_bass" if composer.style.era == "baroque" else "octave_bass"
             place_voice(part, render_texture(name, ctx), start_tick=start_tick,
                         bar_ticks=composer.bar_ticks, beat_ticks=beat_ticks,
                         voice=1, staff=1)

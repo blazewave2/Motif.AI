@@ -135,3 +135,76 @@ class TestAgent:
     def test_bad_input_does_not_raise(self, agent):
         r = agent.run(Request(prompt="continue this", score_xml="<not-xml", seed=1))
         assert r.ok or r.error         # either handled or reported, never a crash
+
+    @pytest.mark.parametrize("phrase", [
+        "Continue this piece in a more dramatic way",
+        "Continue in the same style",
+        "Keep writing in the same style",
+        "Match this style and add a bridge",
+        "Picks up where this leaves off",
+        "Keep going",
+    ])
+    def test_continue_phrasing_is_recognised(self, agent, first, phrase):
+        r = agent.run(Request(prompt=phrase, score_xml=first.musicxml, seed=4))
+        assert r.ok
+        assert r.intent == "continue", f"{phrase!r} was classified {r.intent!r}"
+
+    def test_continue_preserves_the_existing_instrumentation(self, agent):
+        # The bug this guards: continuing a concerto used to silently fall
+        # back to a solo-piano plan, then smear that single part's material
+        # onto every orchestral instrument during the merge.
+        concerto = agent.run(Request(
+            prompt="Make a full Rachmaninoff style piano concerto using a "
+                   "dark Eb minor melody.", seed=7))
+        assert concerto.ok
+        from motif.engrave.musicxml_reader import read_musicxml
+        before = read_musicxml(concerto.musicxml)
+        names_before = [p.name for p in before.parts]
+        assert len(names_before) > 2, "test fixture should be a real ensemble"
+
+        r = agent.run(Request(prompt="Continue this piece in the same style",
+                              score_xml=concerto.musicxml, seed=9))
+        assert r.ok and r.intent == "continue"
+        after = read_musicxml(r.musicxml)
+        assert [p.name for p in after.parts] == names_before
+        assert after.measure_count > before.measure_count
+
+        def tail(part, from_bar):
+            out = []
+            for m in part.measures[from_bar:]:
+                for notes in m.voices.values():
+                    out.extend(tuple(p.midi for p in n.pitches)
+                              for n in notes if n.pitches)
+            return out
+
+        # Two different orchestral parts must not have received an identical
+        # copy of the same continuation line.
+        flute_tail = tail(after.parts[names_before.index("Flute")], before.measure_count)
+        cello_tail = tail(after.parts[names_before.index("Violoncello")],
+                          before.measure_count)
+        assert flute_tail and cello_tail
+        assert flute_tail != cello_tail
+
+    def test_develop_inherits_style_and_instrumentation(self, agent):
+        concerto = agent.run(Request(
+            prompt="Make a full Rachmaninoff style piano concerto using a "
+                   "dark Eb minor melody.", seed=7))
+        assert concerto.ok
+        r = agent.run(Request(prompt="Develop this further",
+                              score_xml=concerto.musicxml, seed=11))
+        assert r.ok and r.intent == "develop"
+        assert r.plan.style == "rachmaninoff"
+        from motif.engrave.musicxml_reader import read_musicxml
+        before_names = [p.name for p in read_musicxml(concerto.musicxml).parts]
+        after_names = [p.name for p in read_musicxml(r.musicxml).parts]
+        assert after_names == before_names
+
+    def test_naming_an_ensemble_still_overrides_continuation(self, agent, first):
+        # An explicit request for different forces must still be honoured —
+        # matching the existing score is the default, not an absolute rule.
+        r = agent.run(Request(prompt="Continue this for a string quartet",
+                              score_xml=first.musicxml, seed=5))
+        assert r.ok
+        from motif.engrave.musicxml_reader import read_musicxml
+        names = {p.name for p in read_musicxml(r.musicxml).parts}
+        assert {"Violin I", "Violin II", "Viola", "Violoncello"} <= names

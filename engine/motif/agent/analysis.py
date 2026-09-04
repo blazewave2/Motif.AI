@@ -20,9 +20,15 @@ class ScoreAnalysis:
     range_low: int = 60
     range_high: int = 72
     density: float = 0.5
+    chromaticism: float = 0.0
+    polyphony: float = 1.0
+    ornament_rate: float = 0.0
+    tempo_span: float = 0.0
     last_melody_pitch: Pitch | None = None
     final_chord_pcs: tuple[int, ...] = ()
     detected_style: str = "classical"
+    style_is_exact: bool = False        # read from the file, not guessed
+    ensemble: str = ""                  # read from the file, when known
     chord_summary: list[str] = field(default_factory=list)
     note_count: int = 0
     is_empty: bool = True
@@ -30,10 +36,12 @@ class ScoreAnalysis:
     def describe(self) -> str:
         if self.is_empty:
             return "The score is empty."
+        style_line = (f"Style: {STYLES[self.detected_style].display}." if self.style_is_exact
+                     else f"Closest style match: {STYLES[self.detected_style].display}.")
         return (f"{self.bars} bars in {self.key}, {self.time[0]}/{self.time[1]}, "
                 f"♩ = {int(self.tempo)}, {self.parts} part(s), "
                 f"range {self.key.spell(self.range_low)}\u2013{self.key.spell(self.range_high)}. "
-                f"Closest style match: {STYLES[self.detected_style].display}.")
+                f"{style_line}")
 
 
 def analyse(score: Score) -> ScoreAnalysis:
@@ -41,6 +49,7 @@ def analyse(score: Score) -> ScoreAnalysis:
                       bars=score.measure_count, parts=len(score.parts))
     pitches: list[int] = []
     durations: list[int] = []
+    ornamented = 0
     last: Pitch | None = None
     for part in score.parts:
         for m in part.measures:
@@ -49,6 +58,8 @@ def analyse(score: Score) -> ScoreAnalysis:
                     if n.is_rest or n.grace:
                         continue
                     durations.append(n.duration)
+                    if n.ornaments:
+                        ornamented += 1
                     for p in n.pitches:
                         pitches.append(p.midi)
     if not pitches:
@@ -58,6 +69,10 @@ def analyse(score: Score) -> ScoreAnalysis:
     a.range_low, a.range_high = min(pitches), max(pitches)
     avg = sum(durations) / len(durations)
     a.density = max(0.0, min(1.0, 1.0 - (avg / (DIVISIONS * 2))))
+    a.polyphony = len(pitches) / len(durations)
+    a.ornament_rate = ornamented / len(durations)
+    if score.tempos:
+        a.tempo_span = max(t.bpm for t in score.tempos) - min(t.bpm for t in score.tempos)
 
     top = score.parts[0]
     for m in reversed(top.measures):
@@ -73,7 +88,21 @@ def analyse(score: Score) -> ScoreAnalysis:
     a.last_melody_pitch = last
 
     a.key = detect_key(pitches, score.key)
-    a.detected_style = detect_style(a)
+    a.chromaticism = sum(1 for p in pitches if p % 12 not in set(a.key.scale_pcs)) / len(pitches)
+
+    # A score Motif itself wrote carries its exact composer and forces as
+    # miscellaneous fields; read those back rather than re-guessing from the
+    # notes, which is only ever an approximation. Anything else — a score
+    # written by hand, or edited enough that the guess is worth trusting —
+    # falls back to the heuristic below.
+    recorded_style = score.metadata.get("style")
+    if recorded_style in STYLES:
+        a.detected_style = recorded_style
+        a.style_is_exact = True
+    else:
+        a.detected_style = detect_style(a)
+    a.ensemble = score.metadata.get("ensemble", "")
+
     a.chord_summary = summarise_harmony(score, a.key)
     if a.chord_summary:
         a.final_chord_pcs = tuple(sorted({p % 12 for p in pitches[-6:]}))
@@ -117,7 +146,15 @@ def _spell_tonic(pc: int, mode: str, hint: Key) -> str:
 
 
 def detect_style(a: ScoreAnalysis) -> str:
-    """Guess which profile the existing music is closest to."""
+    """Guess which profile the existing music is closest to.
+
+    Used only when the score carries no exact record of its own composer (see
+    ``analyse``) — a hand-written score, or one edited enough that guessing
+    again is worth it. Tempo and register alone barely separate the styles
+    (Mozart and Debussy sit almost on top of each other on those two axes);
+    chromaticism, how many notes sound at once, and how freely the tempo
+    moves are what actually tell two composers apart.
+    """
     best, best_score = "classical", -1e9
     span = a.range_high - a.range_low
     for name, p in STYLES.items():
@@ -127,6 +164,11 @@ def detect_style(a: ScoreAnalysis) -> str:
         s -= abs(a.density - p.rhythm_density) * 4.0
         prange = p.rh_range[1] - p.lh_range[0]
         s -= abs(span - prange) / 14.0
+        s -= abs(a.chromaticism - p.chromaticism) * 6.0
+        expected_poly = 1.0 + (0.35 if p.doubling != "none" else 0.0) \
+            + (0.5 if p.rh_style == "chordal" else 0.0)
+        s -= abs(a.polyphony - expected_poly) * 2.5
+        s -= abs(a.ornament_rate - p.ornament_rate) * 5.0
         if s > best_score:
             best, best_score = name, s
     return best

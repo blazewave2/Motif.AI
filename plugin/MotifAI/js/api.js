@@ -64,12 +64,8 @@ function plan(base, token, payload, onDone) {
     return request(base, token, "POST", "/plan", payload, onDone);
 }
 
-// The instrument list that fills the preferences picker. There is no
-// composer list: the composer always comes from the prompt itself.
-function choices(base, token, onDone) {
-    return request(base, token, "GET", "/choices", null, onDone);
-}
-
+// Preferences has no lists to populate — composer and instrumentation are
+// never chosen from a menu, only asked for in the prompt.
 function savePrefs(base, token, prefs, onDone) {
     return request(base, token, "POST", "/preferences", prefs, onDone);
 }

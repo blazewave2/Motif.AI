@@ -88,6 +88,26 @@ class TestMusicXML:
         with pytest.raises(ValueError):
             p.measure(0)
 
+    def test_provenance_metadata_round_trips(self, sample_score):
+        # "Continue in the same style" depends on reading this back exactly,
+        # rather than re-guessing the composer from the notes.
+        sample_score.metadata.update({
+            "style": "chopin", "form": "nocturne", "ensemble": "solo_piano",
+            "character": "wistful", "seed": 42, "prompt": "a nocturne",
+        })
+        back = read_musicxml(to_musicxml(sample_score))
+        assert back.metadata["style"] == "chopin"
+        assert back.metadata["form"] == "nocturne"
+        assert back.metadata["ensemble"] == "solo_piano"
+        assert back.metadata["seed"] == 42          # comes back as an int
+        assert back.metadata["prompt"] == "a nocturne"
+
+    def test_missing_provenance_metadata_is_simply_absent(self, sample_score):
+        # A score with no Motif provenance (hand-written, or from another
+        # application) must not crash the reader or fabricate a style.
+        back = read_musicxml(to_musicxml(sample_score))
+        assert "style" not in back.metadata
+
 
 class TestMIDI:
     def test_header_and_tracks_parse(self, sample_score):

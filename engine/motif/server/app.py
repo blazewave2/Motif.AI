@@ -19,7 +19,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from ..agent.agent import MotifAgent, Request
-from ..compose.orchestration import ENSEMBLES, ENSEMBLE_NAMES
+from ..compose.orchestration import ENSEMBLES
 from ..compose.styles import STYLES
 
 VERSION = "1.0.0"
@@ -166,15 +166,6 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/ensembles":
             return self._json(200, {"ok": True, "ensembles": [
                 {"id": k, "instruments": v} for k, v in ENSEMBLES.items()]})
-        if route == "/choices":
-            # No composer list: the composer is read from the prompt itself,
-            # the same way a musician would ask a person for one.
-            return self._json(200, {
-                "ok": True,
-                "ensembles": [{"id": k, "name": ENSEMBLE_NAMES.get(k, k)}
-                              for k in ENSEMBLES],
-                "preferences": self.state.cfg.get("preferences", {}),
-            })
         return self._json(404, {"ok": False, "error": "not found"})
 
     def do_POST(self) -> None:
@@ -204,16 +195,17 @@ class Handler(BaseHTTPRequestHandler):
         prompt = (body.get("prompt") or "").strip()
         if not prompt:
             return self._json(400, {"ok": False, "error": "prompt is required"})
-        prefs = self.state.cfg.get("preferences", {})
+        # Neither the composer nor the instrumentation is ever taken from a
+        # stored preference — only ever from what the musician actually typed
+        # in the prompt, or an explicit override passed by a caller (the
+        # CLI's --style/--ensemble flags, for instance). When a score is open
+        # and neither is named, the agent matches what is already on the page.
         req = Request(
             prompt=prompt[:4000],
             score_xml=body.get("score_xml") or None,
             seed=body.get("seed"),
-            # The composer is never taken from a stored preference — only ever
-            # from what the musician actually typed, or an explicit override
-            # passed by a caller (the CLI's --style flag, for instance).
             style=body.get("style") or None,
-            ensemble=body.get("ensemble") or prefs.get("ensemble") or None,
+            ensemble=body.get("ensemble") or None,
             history=body.get("history") or [],
             use_model=bool(body.get("use_model", True)))
         started = time.time()
@@ -250,14 +242,15 @@ class Handler(BaseHTTPRequestHandler):
     def _preferences(self, body: dict) -> None:
         """Remember the musician's choices between sessions.
 
-        There is deliberately no stored composer preference: the composer
-        comes from the prompt every time, so it can never go stale.
+        There is deliberately no stored composer or instrumentation
+        preference: both come from the prompt every time — "in the style of
+        Chopin", "for a string quartet", "continue in the same style" — so
+        neither can go stale sitting in a config file, and a piece already
+        open always wins unless the request names something different.
         """
         prefs = self.state.cfg.setdefault("preferences", {})
         prefs.pop("style", None)
-        ensemble = body.get("ensemble")
-        if isinstance(ensemble, str):
-            prefs["ensemble"] = ensemble if ensemble in ENSEMBLES else ""
+        prefs.pop("ensemble", None)
         if "auto_open" in body:
             prefs["auto_open"] = bool(body["auto_open"])
         try:

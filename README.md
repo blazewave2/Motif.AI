@@ -42,9 +42,17 @@ Anything you would ask a composer sitting next to you:
 - *"A Bach fugue in D minor at 92 bpm"*
 - *"Make the middle section darker and slower"*
 - *"Continue this piece in a more dramatic way"* — it reads your open score
+- *"Continue in the same style"* — matches the composer, key, tempo and
+  instruments already on the page, exactly, not a guess
+- *"Continue this for a string quartet"* — carries the piece forward with
+  different or larger forces, on request
 - *"Add a left hand accompaniment"* — keeps your melody, writes underneath it
 - *"Transpose it to F♯ minor"*
 - *"What key is this in?"*
+
+There is no menu for the composer or the instrumentation — both are read
+straight out of what you type, every time, so nothing you could ask for is
+ever missing from a list.
 
 **23 composers** — Bach, Handel, Scarlatti, Vivaldi, Mozart, Haydn, Clementi,
 Beethoven, Schubert, Chopin, Liszt, Brahms, Mendelssohn, Grieg, Tchaikovsky,

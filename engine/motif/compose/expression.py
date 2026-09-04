@@ -7,12 +7,11 @@ notes exist, so the musical structure stays intact.
 """
 from __future__ import annotations
 
-import math
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from ..plan import SectionPlan
-from ..score import DIVISIONS, Direction, Note, QUARTER, TempoMark
+from ..score import Direction, Note, QUARTER, TempoMark
 from .styles import StyleProfile
 
 DYN_VELOCITY = {"ppp": 26, "pp": 38, "p": 52, "mp": 66, "mf": 80,
