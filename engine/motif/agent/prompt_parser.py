@@ -153,13 +153,16 @@ def _fuzzy_style(text: str) -> str | None:
     return best
 
 
-def parse_key(text: str) -> tuple[str | None, str | None]:
+def parse_key(text: str, original: str | None = None) -> tuple[str | None, str | None]:
     """Find an explicit key.  Returns (tonic, mode), either possibly None.
 
-    The letter alone is never enough: "in a more dramatic way" must not be read
-    as the key of A.  A match needs an accidental, a mode word, or "key of".
+    "in a more dramatic way" must not become the key of A, but "a sonata in G"
+    must not be thrown away either.  A bare letter is accepted when it stands
+    alone; the only genuinely ambiguous one is "a", which is also the English
+    article, so there it takes a capital in the original text to count.
     """
     t = text.replace("\u266f", "#").replace("\u266d", "b")
+    src = original or text
     modes = "major|minor|maj|min|dorian|phrygian|lydian|mixolydian|aeolian|locrian"
 
     # "in a minor key" asks for the mode, not for the key of A.
@@ -167,36 +170,42 @@ def parse_key(text: str) -> tuple[str | None, str | None]:
     if generic:
         return None, generic.group(1)
 
-    # "key of Eb", "key of D minor" — the phrase itself disambiguates.
+    def finish(letter_raw, acc_raw, mode_raw, span=None):
+        acc, mode = (acc_raw or "").lower(), (mode_raw or "").lower()
+        if acc == "b" and span is not None and span[0] != span[1]:
+            acc = ""            # "B minor" is the key of B, not B-flat
+        letter = letter_raw.upper()
+        if acc in ("sharp", "#"):
+            letter += "#"
+        elif acc in ("flat", "b"):
+            letter += "b"
+        mode = {"maj": "major", "min": "minor", "": ""}.get(mode, mode)
+        return letter, (mode or None)
+
+    # 1. An accidental or a mode word makes the key unambiguous.
     m = re.search(r"\bkey of\s+([A-Ga-g])\s?(sharp|flat|#|b)?[\s-]*(" + modes + r")?\b",
                   t, re.I)
-    if not m:
-        # Otherwise require an accidental word/symbol, a mode word, or both.
-        m = re.search(r"\b([A-Ga-g])[\s-]?(sharp|flat|#|b)[\s-]*(" + modes + r")?\b", t)
-        if not m:
-            m = re.search(r"\b([A-Ga-g])[\s-]?(sharp|flat|#|b)?[\s-]*(" + modes + r")\b", t)
-    if not m:
-        return None, None
+    if m:
+        return finish(m.group(1), m.group(2), m.group(3),
+                      (m.end(1), m.start(2)) if m.group(2) else None)
+    m = re.search(r"\b([A-Ga-g])[\s-]?(sharp|flat|#|b)[\s-]*(" + modes + r")?\b", t)
+    if m:
+        return finish(m.group(1), m.group(2), m.group(3), (m.end(1), m.start(2)))
+    m = re.search(r"\b([A-Ga-g])[\s-]?(sharp|flat|#|b)?[\s-]*(" + modes + r")\b", t)
+    if m:
+        return finish(m.group(1), m.group(2), m.group(3),
+                      (m.end(1), m.start(2)) if m.group(2) else None)
 
-    letter_raw, acc_raw, mode_raw = m.group(1), (m.group(2) or ""), (m.group(3) or "")
-    acc, mode = acc_raw.lower(), mode_raw.lower()
-
-    # A lone lowercase "a"/"b" with no accidental is the article or a bare note
-    # name; only accept it when a mode word makes the intent explicit.
-    if letter_raw.islower() and not acc and not mode:
-        return None, None
-    # "b" as an accidental only counts when it directly abuts the letter, so
-    # "B minor" stays the key of B rather than becoming B-flat.
-    if acc == "b" and m.start(2) != m.end(1):
-        acc = ""
-
-    letter = letter_raw.upper()
-    if acc in ("sharp", "#"):
-        letter += "#"
-    elif acc in ("flat", "b"):
-        letter += "b"
-    mode = {"maj": "major", "min": "minor", "": ""}.get(mode, mode)
-    return letter, (mode or None)
+    # 2. A bare letter standing on its own after "in": "a sonata in G".
+    for match in re.finditer(r"\b(?:in|key of)\s+([A-Ga-g])(?=$|[\s,.;:!?)]|\s+at\b)", t):
+        letter = match.group(1)
+        if letter.lower() != "a":
+            return letter.upper(), None
+        # Only a capital A in what the musician actually typed means the key.
+        at = match.start(1)
+        if at < len(src) and src[at] == "A":
+            return "A", None
+    return None, None
 
 
 def _mood_scores(text: str) -> dict[str, float]:
@@ -239,9 +248,13 @@ def parse_prompt(prompt: str, *, seed: int | None = None,
     character = ", ".join(sorted(moods, key=lambda m: -moods[m])[:2])
 
     # -- key --------------------------------------------------------------
-    tonic, mode = parse_key(text)
+    tonic, mode = parse_key(text, prompt)
     if mode is None:
-        if minor_pull > 0.2:
+        if tonic is not None:
+            # A key named without a mode — "a sonata in G" — means major by
+            # convention, unless the request is plainly dark.
+            mode = "minor" if minor_pull > 0.6 else "major"
+        elif minor_pull > 0.2:
             mode = "minor"
         elif minor_pull < -0.2:
             mode = "major"

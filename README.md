@@ -1,11 +1,11 @@
 <div align="center">
 
-# Motif.AI
+<img src="plugin/MotifAI/assets/wordmark.png" width="380" alt="Motif.AI">
 
-**Your AI composing partner — a generative, agentic composer for MuseScore.**
+**Your AI composing partner, inside MuseScore.**
 
-Describe a piece in plain English. Motif plans it, writes it, and opens it in
-MuseScore as fully engraved notation — slurs, pedalling, dynamics and all.
+Describe a piece in your own words. Motif writes it — fully engraved, with
+phrasing, pedalling, dynamics and rubato — and opens it in MuseScore.
 
 </div>
 
@@ -14,145 +14,76 @@ MuseScore as fully engraved notation — slurs, pedalling, dynamics and all.
 ```
 "Create a simple melody for me to play."
 
-"Make a full Rachmaninoff style piano concerto using a dark Eb minor melody."
+"Make a full Rachmaninoff style piano concerto using a dark E♭ minor melody."
 ```
 
-Both work. The first returns sixteen playable bars in a couple of hundred
-milliseconds; the second returns a 120-bar concerto for piano and orchestra
-with real solo/tutti alternation, a cadenza and a coda, in about a second.
+Both work. The first gives you sixteen playable bars almost instantly. The
+second gives you a 120-bar concerto for piano and orchestra, with solo and
+tutti trading, a cadenza and a coda.
 
-## What it is
+## Getting started
 
-A dockable panel inside MuseScore Studio backed by a local composing engine.
-The engine is the interesting part: it is not a language model writing note
-names. It is a music-theory system — spelled pitch, functional harmony, voice
-leading, formal templates, per-composer idiom libraries — driven by an agent
-that turns your sentence into a structured plan.
+1. Open the **Install Motif** folder and double-click the item for your
+   computer.
+2. Choose **Install**. It takes a few seconds.
+3. Open MuseScore and choose **Motif.AI** from the Plugins menu.
 
-That design is deliberate. A neural model trained on a public-domain corpus
-gives you a plausible melodic voice; it does not give you a piece that
-modulates to the relative major, develops its opening motif, and cadences
-properly forty bars later. Motif splits the job:
+That's all of it. Motif starts with your computer from then on, so the panel is
+ready whenever MuseScore is. Nothing is typed, and nothing leaves your machine.
 
-| Layer | Owns | Why |
-|---|---|---|
-| **Prompt parser** | style, key, metre, tempo, form, mood, scope | Deterministic, instant, works offline |
-| **Planner** *(optional Claude)* | section map, dramatic arc, key scheme | Where a language model genuinely helps |
-| **Neural model** *(optional)* | the seed motif — the melodic voice | Learned from real scores |
-| **Theory engine** | harmony, voice leading, texture, form | Guarantees it is *correct* music |
-| **Engraver** | MusicXML / MIDI | Guarantees it is *readable* music |
-
-Every layer above the theory engine is optional. With none of them installed
-Motif still composes — it just leans entirely on its own musicianship.
-
-## Install
-
-Requires **Python 3.10+** and **MuseScore 4** (MuseScore 3 also works). There
-are no Python packages to install: the engine runs on the standard library.
-
-```bash
-git clone https://github.com/blazewave2/Motif.AI
-cd Motif.AI
-python3 install.py
-```
-
-Then start the engine and enable the plugin:
-
-```bash
-./scripts/motif-serve          # Windows: scripts\motif-serve.bat
-```
-
-In MuseScore: **Plugins ▸ Manage plugins…** → enable **Motif.AI** →
-**Plugins ▸ Motif.AI**. The panel finds the engine by itself.
-
-### Without MuseScore
-
-```bash
-./scripts/motif-serve compose "a Chopin nocturne in Eb minor" -o out --midi
-```
-
-## How it composes
-
-Ask for a Rachmaninoff concerto and this happens:
-
-1. **Parse** — `rachmaninoff`, `Eb minor`, `piano_concerto`, `concerto` form,
-   ~120 bars, character `dark`. The misspelling in "Rachmanninoff" is matched
-   by edit distance.
-2. **Plan** — the concerto template lays out Tutti I → Solo I → Transition →
-   Solo II → Tutti II → Development → Cadenza → Recap → Coda, with a key
-   scheme, an energy curve peaking at the cadenza, and a texture per section.
-3. **Invent a motif** — a short cell of scale-degree steps plus a rhythm. Every
-   later section is a transformation of it: inverted, sequenced, fragmented,
-   augmented, recalled.
-4. **Harmonise** — functional progressions coloured with applied dominants,
-   borrowed chords and Neapolitans at rates drawn from the style profile, each
-   section landing on a real cadence.
-5. **Write the melody** — a structural skeleton of chord tones traces a
-   registral contour; the gaps are filled by a scored search that prefers
-   stepwise motion, resolves leaps, and treats dissonance the way a musician
-   does.
-6. **Orchestrate** — the same material is handed to ten instruments by role,
-   with solo sections properly resting the orchestra.
-7. **Engrave** — MusicXML with tied notes split at beat boundaries, slurs,
-   hairpins, pedalling, articulations and grace notes.
+To remove it, open Setup again and choose **Remove**.
 
 ## What you can ask for
 
-Anything in this shape, and a great deal that is not:
+Anything you would ask a composer sitting next to you:
 
 - *"Compose a romantic piano piece in the style of Chopin"*
 - *"Write a short film score for a mysterious forest scene"*
-- *"A Bach fugue in D minor at 92 bpm, 24 bars"*
-- *"Continue this piece in a more dramatic way"* — reads your open score
-- *"Add a left hand accompaniment"* — keeps your melody, writes under it
-- *"Transpose it to F# minor and make it slower"*
+- *"A Bach fugue in D minor at 92 bpm"*
+- *"Make the middle section darker and slower"*
+- *"Continue this piece in a more dramatic way"* — it reads your open score
+- *"Add a left hand accompaniment"* — keeps your melody, writes underneath it
+- *"Transpose it to F♯ minor"*
 - *"What key is this in?"*
 
-**23 composer styles** — Bach, Handel, Scarlatti, Vivaldi, Mozart, Haydn,
-Clementi, Beethoven, Schubert, Chopin, Liszt, Brahms, Mendelssohn, Grieg,
-Tchaikovsky, Rachmaninoff, Scriabin, Debussy, Ravel, Satie, and contemporary
-minimal / cinematic idioms.
+**23 composers** — Bach, Handel, Scarlatti, Vivaldi, Mozart, Haydn, Clementi,
+Beethoven, Schubert, Chopin, Liszt, Brahms, Mendelssohn, Grieg, Tchaikovsky,
+Rachmaninov, Scriabin, Debussy, Ravel, Satie, and contemporary minimal and
+cinematic idioms.
 
 **30 forms** — nocturne, sonata, fugue, invention, rondo, variations, waltz,
-mazurka, ballade, prelude, étude, intermezzo, concerto, and more.
+mazurka, ballade, prelude, étude, intermezzo, concerto and more.
 
 **13 ensembles** — solo piano through full orchestra, string quartet, piano
 trio, concerto, duo sonatas, organ, harpsichord, guitar.
 
-## Training your own model
+## Why it sounds played rather than printed
 
-Motif ships without a checkpoint and works fully without one. To train the
-optional neural model on Modal inside a **$30 budget**, see
-**[docs/TRAINING.md](docs/TRAINING.md)**. Short version:
+Motif is not a language model guessing at note names. It is a music-theory
+system — spelled pitch, functional harmony, voice leading, per-composer idiom
+libraries — with a performance layer on top of it.
 
-```bash
-modal run training/modal_app.py --step corpus     # public-domain scores
-modal run training/modal_app.py --step prepare    # tokenize + augment
-modal run training/modal_app.py --step train --budget 22
-modal run training/modal_app.py --step download
-```
+That performance layer is what makes the difference:
 
-The budget is enforced inside the training loop, not just documented: the run
-checkpoints and stops before the estimated spend crosses your cap.
+| | |
+|---|---|
+| **The tempo breathes** | Phrases ease into their cadences and press through developments; the piece slows at its close. How freely depends on the composer — Bach holds his pulse, Chopin does not. |
+| **The volume moves** | Every note is shaped by where it sits in the phrase, how high it is, and where the beat falls — not stepped between eight printed marks. The melody is voiced above the accompaniment, as a pianist balances the hands. |
+| **The rhythm varies** | Accompaniments rest, hold, halve their motion, lean into a dotted lilt or turn over in triplets. Mazurkas lean on the second beat; Brahms writes hemiolas. |
+| **The harmony travels** | Sections modulate to real key relationships, coloured with applied dominants, borrowed chords and Neapolitans at rates drawn from each composer. |
 
 ## Privacy
 
-The engine binds to `127.0.0.1` only, authenticates with a token written to
-`~/.motif/config.json`, and rejects any request carrying an `Origin` header so
-a web page cannot reach it. Your music never leaves your machine unless you
-configure the optional Claude planner, which receives your prompt and the
-draft plan — never your score.
+Everything happens on your computer. Motif listens only to MuseScore, on your
+own machine, and your music is never sent anywhere.
 
-## Development
+## For developers
 
-```bash
-pip install pytest music21          # for the test suite and data prep
-cd engine && python -m pytest       # 182 tests
-```
-
-Docs: **[Architecture](docs/ARCHITECTURE.md)** · **[Training](docs/TRAINING.md)**
+Architecture, the engine's design decisions and the optional trained model are
+documented in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** and
+**[docs/TRAINING.md](docs/TRAINING.md)**. The engine has no required
+dependencies and its test suite runs with `pytest` from `engine/`.
 
 ## Licence
 
-MIT. Generated music is yours. Training corpora are separately licensed — see
-[docs/TRAINING.md](docs/TRAINING.md).
+MIT. The music you make with Motif is yours.

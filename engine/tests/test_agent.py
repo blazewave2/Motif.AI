@@ -9,7 +9,7 @@ class TestKeyParsing:
     @pytest.mark.parametrize("text,expected", [
         ("continue this piece in a more dramatic way", (None, None)),
         ("create a joyful melody in 6/8 time", (None, None)),
-        ("write something in c", (None, None)),
+        ("write something in c", ("C", None)),
         ("a gentle piece for a friend", (None, None)),
         ("a dark eb minor melody", ("Eb", "minor")),
         ("a bach fugue in d minor", ("D", "minor")),
@@ -21,9 +21,16 @@ class TestKeyParsing:
         # "a minor key" means the mode, not the key of A.
         ("add a contrasting middle section in a minor key", (None, "minor")),
         ("transpose into a major key", (None, "major")),
+        # A bare letter after "in" is a key when it stands alone; only "a" is
+        # ambiguous with the article, so there capitalisation decides.
+        ("a mozart sonata in G", ("G", None)),
+        ("a fugue in D at 92 bpm", ("D", None)),
+        ("write a nocturne in C", ("C", None)),
+        ("a piece in A", ("A", None)),
+        ("a piece in a", (None, None)),
     ])
     def test_parse_key(self, text, expected):
-        assert parse_key(text) == expected
+        assert parse_key(text, text) == expected
 
 
 class TestPromptParsing:
@@ -43,6 +50,13 @@ class TestPromptParsing:
         assert p.ensemble == "solo_piano"
         assert all(s.energy <= 0.6 for s in p.sections)
         assert all(s.register == 0 for s in p.sections)
+
+    @pytest.mark.parametrize("seed", [1, 2, 3, 4])
+    def test_requested_key_survives_a_bare_letter(self, seed):
+        # A key named without a mode means major, and must not be re-rolled.
+        assert parse_prompt("a mozart sonata in G", seed=seed).key == "G major"
+        assert parse_prompt("a nocturne in C", seed=seed).key == "C major"
+        assert parse_prompt("a dark elegy in F", seed=seed).key.startswith("F")
 
     @pytest.mark.parametrize("text,field,value", [
         ("a bach fugue in D minor", "form", "fugue"),

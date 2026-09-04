@@ -154,7 +154,7 @@ class MotifAgent:
         plan = self._plan_for(req)
         # The existing score wins on every musical parameter the user did not
         # explicitly override; continuing in a different key is not continuing.
-        stated_tonic, stated_mode = parse_key(req.prompt.lower())
+        stated_tonic, stated_mode = parse_key(req.prompt.lower(), req.prompt)
         if not stated_tonic:
             plan.key = str(info.key)
         plan.time = info.time
@@ -189,7 +189,7 @@ class MotifAgent:
 
     def _develop(self, req: Request, existing: Score, info: ScoreAnalysis) -> Result:
         plan = self._plan_for(req)
-        stated_tonic, _ = parse_key(req.prompt.lower())
+        stated_tonic, _ = parse_key(req.prompt.lower(), req.prompt)
         if not stated_tonic:
             plan.key = str(info.key)
         plan.time = info.time
@@ -232,7 +232,7 @@ class MotifAgent:
         score = existing
         applied: list[str] = []
 
-        tonic, mode = parse_key(t)
+        tonic, mode = parse_key(t, req.prompt)
         if tonic and ("transpose" in t or "in the key of" in t or "into" in t):
             target = Key(tonic, mode or ("minor" if info.key.is_minor else "major"))
             semis = (target.tonic_pc - info.key.tonic_pc) % 12

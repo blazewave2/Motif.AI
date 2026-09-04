@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Motif Setup
+Comment=Install Motif.AI into MuseScore
+Exec=python3 "/home/user/Motif.AI/setup/motif_setup.py"
+Icon=/home/user/Motif.AI/plugin/MotifAI/assets/icon-256.png
+Terminal=false
+Categories=AudioVideo;Audio;Music;

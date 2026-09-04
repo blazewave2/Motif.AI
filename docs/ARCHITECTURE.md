@@ -84,6 +84,23 @@ final pass folds any note outside the instrument's range back into it.
 score; a different seed produces different music. "Try again" in the panel is
 simply a new seed.
 
+## Setup and lifetime
+
+Setup is a small window (`setup/motif_setup.py`), wrapped per platform by the
+launchers in `Install Motif/`: a real `.app` bundle on macOS, a windowless
+`.pyw` on Windows, a desktop entry on Linux. It installs the panel into
+MuseScore, registers a per-user login item so the engine starts with the
+computer, and starts it immediately.
+
+Login items are user-scoped and reversible: a LaunchAgent on macOS, a
+Startup-folder VBScript on Windows, an autostart desktop entry on Linux.
+Nothing is written outside the home folder and nothing needs administrator
+rights.
+
+The panel discovers the engine from `~/.motif/config.json`, so no address or
+key is ever shown to the musician, and it retries quietly while the engine
+comes up rather than telling anyone to start something.
+
 ## Security
 
 - The server binds `127.0.0.1` only.

@@ -1,0 +1,14 @@
+Motif.AI
+========
+
+Double-click the item for your computer:
+
+  macOS     Motif Setup.app
+  Windows   Motif Setup.pyw   (or Motif Setup.bat)
+  Linux     Motif Setup.command
+
+Setup adds Motif to MuseScore and sets it to start with your
+computer. Then open MuseScore and choose Motif.AI from the
+Plugins menu.
+
+To remove Motif, open Setup again and choose Remove.

@@ -103,14 +103,9 @@ modal run training/modal_app.py --step sample --style chopin --key "Eb minor"
 modal run training/modal_app.py --step download
 ```
 
-Then point the engine at the checkpoint:
-
-```bash
-MOTIF_MODEL=checkpoints/motif-small.pt ./scripts/motif-serve
-```
-
-or set `model_path` in `~/.motif/config.json`. The panel's Settings view shows
-whether the model loaded.
+Then set `model_path` in `~/.motif/config.json` to the checkpoint, or start
+the engine with `MOTIF_MODEL` pointing at it. Motif picks it up on its next
+start; the panel keeps working exactly as before if it fails to load.
 
 ### Budget
 
