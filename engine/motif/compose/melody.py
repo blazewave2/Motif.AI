@@ -152,19 +152,29 @@ class MelodyWriter:
               contour: Contour, *, center: int = 72, amplitude: float = 7.0,
               bar_ticks: int = 1920, beat_ticks: int = QUARTER,
               motif: Motif | None = None, motif_positions: set[int] | None = None,
+              motif_op: str = "develop",
               start_pitch: Pitch | None = None,
               cadence_pitch: Pitch | None = None) -> list[Note]:
-        """Render a melody.  ``rhythm`` is (start_tick, duration, tuplet) triples."""
+        """Render a melody.  ``rhythm`` is (start_tick, duration, tuplet) triples.
+
+        When a seed motif is given, the whole line is spun continuously from
+        it — every phrase a developing variation of the last, the way a
+        piece is actually built from a small number of cells rather than
+        generated fresh note by note. A free harmonic search only ever
+        supplies the final cadence note and, if no motif was given at all,
+        the entire line (kept for callers with no thematic material).
+        """
         if not rhythm:
             return []
         targets = self.skeleton(timeline, contour, center, amplitude, start_pitch)
-        motif_positions = motif_positions or set()
 
         notes: list[Note] = []
         prev: Pitch | None = start_pitch
         prev_interval = 0
         peak_midi = -1
         motif_queue: list[Pitch] = []
+        cur_motif = motif
+        spins = 0
 
         for idx, (tick, dur, tup) in enumerate(rhythm):
             chord = timeline.at(tick)
@@ -173,15 +183,51 @@ class MelodyWriter:
 
             if is_last and cadence_pitch is not None:
                 pitch = cadence_pitch
-            elif motif_queue:
-                pitch = motif_queue.pop(0)
+            elif motif is not None:
+                if not motif_queue:
+                    # Only the very first statement anchors to the contour
+                    # skeleton; every later one continues from the note that
+                    # was actually just played. Re-anchoring to the skeleton
+                    # on every refill fights the motif's own rising or
+                    # falling shape and produces an artificial sawtooth —
+                    # climb, snap back, climb again — instead of a line.
+                    if spins == 0 or prev is None:
+                        anchor = targets.get(tick) or self._nearest_target(targets, tick) or prev
+                        anchor = anchor or self.key.degree_pitch(1, center // 12 - 1)
+                    else:
+                        anchor = prev
+                        # Steer toward whichever direction the phrase needs
+                        # next, so a steadily rising cell doesn't just climb
+                        # forever (needing constant octave correction) once
+                        # the contour should turn back down — a real
+                        # composer picks the transformation that serves
+                        # where the line is going, not a fixed shape on
+                        # repeat.
+                        base = cur_motif
+                        nxt_target = self._next_target(targets, tick)
+                        if nxt_target is not None and cur_motif.steps:
+                            want_up = nxt_target[1].midi > prev.midi
+                            is_up = sum(cur_motif.steps) >= 0
+                            if want_up != is_up:
+                                base = cur_motif.invert()
+                        cur_motif = self._spin(base, motif_op)
+                    spins += 1
+                    realized = cur_motif.realize(self.key, anchor, self.scale_variant)
+                    # Loosely track the contour's register by folding a
+                    # whole octave when a statement has drifted far from
+                    # where the phrase should sit — the shape (every
+                    # interval) survives exactly; only its register moves,
+                    # the way a real line jumps octaves rather than snapping
+                    # note by note back onto a target.
+                    target = targets.get(tick) or self._nearest_target(targets, tick)
+                    if target is not None and abs(realized[0].midi - target.midi) > 8:
+                        shift = -12 if realized[0].midi > target.midi else 12
+                        realized = [self.key.spell(p.midi + shift) for p in realized]
+                    pitch = realized[0]
+                    motif_queue = list(realized[1:])
+                else:
+                    pitch = motif_queue.pop(0)
                 pitch = self._fit(pitch, chord, strength)
-            elif motif is not None and tick in motif_positions:
-                anchor = targets.get(tick) or self._nearest_target(targets, tick) or prev
-                anchor = anchor or self.key.degree_pitch(1, center // 12 - 1)
-                realized = motif.realize(self.key, anchor, self.scale_variant)
-                pitch = realized[0]
-                motif_queue = list(realized[1:])
             else:
                 pitch = self._choose(prev, prev_interval, chord, strength, tick, dur,
                                      targets, timeline, peak_midi)
@@ -196,6 +242,36 @@ class MelodyWriter:
             prev = pitch
             peak_midi = max(peak_midi, pitch.midi)
         return notes
+
+    def _spin(self, motif: Motif, op: str) -> Motif:
+        """The next statement in a developing-variation chain.
+
+        Each refill grows out of the one before it — an evolving line, not
+        the same four notes pasted end to end — while staying mild enough
+        (a step of transposition, an inversion, a fragment) that it is still
+        recognisably the same idea a few statements later.
+        """
+        # A fresh anchor is picked from the contour skeleton on every refill,
+        # so restating the plain cell already reads as a melodic sequence —
+        # the shape repeating at a new pitch level — without touching its
+        # intervals at all. Only transformations that actually change
+        # ``.steps`` belong here; a transposition applied to the motif
+        # itself has nothing to act on once the anchor comes from outside it.
+        pool = {
+            "sequence": [lambda m: m, lambda m: m,
+                        lambda m: m.fragment(0, max(2, m.length - 1))],
+            "invert": [lambda m: m.invert(),
+                      lambda m: m.invert().fragment(0, max(2, m.length - 1))],
+            "fragment": [lambda m: m.fragment(0, max(2, m.length - 1))],
+            "augment": [lambda m: m, lambda m: m.smooth()],
+            "state": [lambda m: m],
+            "recall": [lambda m: m],
+        }.get(op, [lambda m: m.invert(),
+                   lambda m: m.fragment(0, max(2, m.length - 1)),
+                   lambda m: m.retrograde(),
+                   lambda m: m.smooth(),
+                   lambda m: m])
+        return self.rng.choice(pool)(motif)
 
     # -- note choice ------------------------------------------------------
     def _choose(self, prev: Pitch | None, prev_interval: int, chord: Chord,

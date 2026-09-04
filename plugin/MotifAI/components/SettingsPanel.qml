@@ -59,6 +59,31 @@ Item {
 
         Column {
             width: parent.width
+            spacing: 6
+            Text {
+                text: "Quick access"
+                color: T.text
+                font.family: T.sans
+                font.pixelSize: T.fsSmall
+                font.bold: true
+            }
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: "MuseScore doesn't let a plugin add its own toolbar button, "
+                      + "but you can give Motif a one-key shortcut instead: open "
+                      + "Plugins → Manage Plugins, select Motif.AI, and choose "
+                      + "Define Shortcut."
+                color: T.textMuted
+                font.family: T.sans
+                font.pixelSize: T.fsSmall
+            }
+        }
+
+        Rectangle { width: parent.width; height: 1; color: T.border }
+
+        Column {
+            width: parent.width
             spacing: 8
             Row {
                 spacing: 8

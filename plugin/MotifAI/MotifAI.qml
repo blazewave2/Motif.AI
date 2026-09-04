@@ -21,7 +21,7 @@ MuseScore {
     description: "Your AI composing partner — describe a piece and Motif writes it."
     version: "1.0.0"
     pluginType: "dock"
-    dockArea: "left"
+    dockArea: "right"
     requiresScore: false
     thumbnailName: "assets/thumbnail.png"
 
@@ -48,6 +48,7 @@ MuseScore {
     property bool settingsOpen: false
     property string lastPrompt: ""
     property int seedCounter: 0
+    property string progressLabel: "Composing…"
 
     ListModel { id: conversation }
 
@@ -123,6 +124,21 @@ MuseScore {
         onTriggered: root.checkHealth()
     }
 
+    // While a piece is being written, this shows what Motif is actually
+    // doing — sketching the theme, developing it, engraving the result —
+    // instead of a plain "thinking" spinner with nothing behind it.
+    Timer {
+        id: progressTimer
+        interval: 450
+        repeat: true
+        running: root.busy
+        onTriggered: Api.progress(root.serverUrl, root.apiToken, function (res) {
+            if (res && res.ok === true && res.text)
+                root.progressLabel = res.text;
+        })
+        onRunningChanged: if (running) root.progressLabel = "Composing…"
+    }
+
     function checkHealth() {
         if (root.connState !== "ready")
             root.connState = "checking";
@@ -184,8 +200,14 @@ MuseScore {
         // "in the style of Chopin", "for a string quartet", "continue in the
         // same style". When a score is open and you don't name different
         // forces, Motif keeps whatever is already playing.
+        var scorePath = "";
+        try {
+            if (typeof curScore !== "undefined" && curScore !== null)
+                scorePath = curScore.path || "";
+        } catch (e) { scorePath = ""; }
+
         var payload = { prompt: promptText, seed: nextSeed(),
-                        score_xml: currentScoreXml() };
+                        score_xml: currentScoreXml(), score_path: scorePath };
 
         Api.compose(root.serverUrl, root.apiToken, payload, function (res) {
             root.busy = false;
@@ -209,8 +231,14 @@ MuseScore {
                           describe(res.plan), !!res.musicxml_path);
             conversation.setProperty(conversation.count - 1, "xmlPath",
                                      res.musicxml_path || "");
-            if (root.autoOpen && res.musicxml_path && res.musicxml_path.length)
-                openScore(res.musicxml_path);
+            // A change to the piece already open must be shown right away
+            // regardless of the auto-open preference: leaving the old
+            // version on screen while the file underneath it has changed
+            // risks the musician's next save overwriting what Motif wrote.
+            if (res.same_file && res.musicxml_path)
+                openScore(res.musicxml_path, true);
+            else if (root.autoOpen && res.musicxml_path && res.musicxml_path.length)
+                openScore(res.musicxml_path, false);
         });
     }
 
@@ -245,7 +273,7 @@ MuseScore {
         return s;
     }
 
-    function openScore(path) {
+    function openScore(path, sameFile) {
         var opened = false;
         try {
             var s = readScore(path);
@@ -256,10 +284,13 @@ MuseScore {
         } catch (e) {
             opened = false;
         }
-        if (!opened)
-            appendMessage("system",
-                "Your score is saved in the Motif folder in your Documents. "
-                + "Open it from there if it didn’t appear.", "", false);
+        if (!opened) {
+            appendMessage("system", sameFile
+                ? "Motif updated your score, but couldn’t refresh the page on "
+                  + "screen. Close and reopen it to see the change."
+                : "Your score is saved in the Motif folder in your Documents. "
+                  + "Open it from there if it didn’t appear.", "", false);
+        }
     }
 
     function appendMessage(role, text, detail, hasScore) {
@@ -427,7 +458,7 @@ MuseScore {
                                 }
                                 Component {
                                     id: pendingRow
-                                    Thinking { active: root.busy }
+                                    Thinking { active: root.busy; label: root.progressLabel }
                                 }
                             }
                         }

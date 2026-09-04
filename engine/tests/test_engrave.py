@@ -5,12 +5,13 @@ from xml.etree import ElementTree as ET
 
 import pytest
 
+from motif.engrave.beaming import apply_beams
 from motif.engrave.midi import to_midi
 from motif.engrave.musicxml import to_musicxml
 from motif.engrave.musicxml_reader import read_musicxml
-from motif.score import (DIVISIONS, HALF, Direction, Note, Part, QUARTER, Score,
-                         TempoMark, WHOLE, bar_duration, note_type_and_dots,
-                         split_duration)
+from motif.score import (DIVISIONS, EIGHTH, HALF, Direction, Note, Part, QUARTER, Score,
+                         SIXTEENTH, TempoMark, Tuplet, WHOLE,
+                         note_type_and_dots, split_duration)
 from motif.theory.pitch import Key, Pitch
 
 
@@ -107,6 +108,93 @@ class TestMusicXML:
         # application) must not crash the reader or fabricate a style.
         back = read_musicxml(to_musicxml(sample_score))
         assert "style" not in back.metadata
+
+
+class TestBeaming:
+    """Nothing upstream ever set ``Note.beam`` — without this pass every
+    eighth note and shorter prints as an isolated flagged note."""
+
+    def _voice(self, durations, time=(4, 4)):
+        p = Part()
+        m = p.measure(1)
+        for d in durations:
+            m.add(Note([Pitch.parse("C4")], d, voice=1, staff=1))
+        apply_beams(p, time)
+        return m.voices[1]
+
+    def test_four_eighths_beam_in_pairs_per_beat(self):
+        # Simple quadruple time beams by the quarter-note beat, not the whole
+        # bar: two pairs, not one group of four.
+        notes = self._voice([EIGHTH] * 4)
+        assert [n.beam for n in notes] == [["begin"], ["end"], ["begin"], ["end"]]
+
+    def test_quarter_notes_are_never_beamed(self):
+        notes = self._voice([QUARTER, QUARTER, QUARTER, QUARTER])
+        assert all(n.beam == [] for n in notes)
+
+    def test_a_lone_eighth_with_no_beamable_partner_is_not_beamed(self):
+        # The eighth shares its beat only with a rest, so it has no partner.
+        p = Part()
+        m = p.measure(1)
+        m.add(Note([Pitch.parse("C4")], QUARTER, voice=1, staff=1))
+        m.add(Note([Pitch.parse("D4")], EIGHTH, voice=1, staff=1))
+        m.add(Note([], EIGHTH, voice=1, staff=1))
+        m.add(Note([Pitch.parse("E4")], QUARTER, voice=1, staff=1))
+        m.add(Note([Pitch.parse("F4")], QUARTER, voice=1, staff=1))
+        apply_beams(p, (4, 4))
+        assert m.voices[1][1].beam == []
+
+    def test_rest_breaks_a_beam_group(self):
+        p = Part()
+        m = p.measure(1)
+        m.add(Note([Pitch.parse("C4")], EIGHTH, voice=1, staff=1))
+        m.add(Note([], EIGHTH, voice=1, staff=1))                 # rest
+        m.add(Note([Pitch.parse("D4")], EIGHTH, voice=1, staff=1))
+        m.add(Note([Pitch.parse("E4")], EIGHTH, voice=1, staff=1))
+        apply_beams(p, (4, 4))
+        notes = m.voices[1]
+        assert notes[0].beam == [] and notes[1].beam == []        # isolated either side
+        assert notes[2].beam == ["begin"] and notes[3].beam == ["end"]
+
+    def test_dotted_eighth_sixteenth_pair_hooks_the_sixteenth(self):
+        notes = self._voice([EIGHTH + SIXTEENTH, SIXTEENTH])
+        assert notes[0].beam == ["begin"]
+        assert notes[1].beam == ["end", "backward hook"]
+
+    def test_beam_group_never_crosses_a_beat_boundary(self):
+        # An eighth ending a beat and one opening the next do not share a beam.
+        notes = self._voice([QUARTER, EIGHTH, EIGHTH, EIGHTH, EIGHTH, QUARTER])
+        assert notes[1].beam == ["begin"] and notes[2].beam == ["end"]
+        assert notes[3].beam == ["begin"] and notes[4].beam == ["end"]
+
+    def test_compound_metre_beams_the_whole_dotted_quarter(self):
+        notes = self._voice([EIGHTH, EIGHTH, EIGHTH, EIGHTH, EIGHTH, EIGHTH], time=(6, 8))
+        assert [n.beam for n in notes[:3]] == [["begin"], ["continue"], ["end"]]
+        assert [n.beam for n in notes[3:]] == [["begin"], ["continue"], ["end"]]
+
+    def test_triplet_eighths_beam_together(self):
+        p = Part()
+        m = p.measure(1)
+        for i in range(3):
+            n = Note([Pitch.parse("C4")], DIVISIONS // 3, voice=1, staff=1)
+            n.tuplet = Tuplet(3, 2, "eighth", start=(i == 0), stop=(i == 2))
+            m.add(n)
+        m.add(Note([Pitch.parse("C4")], QUARTER * 3, voice=1, staff=1))
+        apply_beams(p, (4, 4))
+        notes = m.voices[1]
+        assert [n.beam for n in notes[:3]] == [["begin"], ["continue"], ["end"]]
+
+    def test_musicxml_export_carries_beam_elements(self):
+        p = Part()
+        m = p.measure(1)
+        for _ in range(4):
+            m.add(Note([Pitch.parse("C4")], EIGHTH, voice=1, staff=1))
+        apply_beams(p, (4, 4))
+        score = Score(parts=[p])
+        root = ET.fromstring(to_musicxml(score))
+        beams = root.findall(".//beam")
+        assert len(beams) == 4
+        assert [b.text for b in beams] == ["begin", "end", "begin", "end"]
 
 
 class TestMIDI:

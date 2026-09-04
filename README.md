@@ -79,11 +79,16 @@ That performance layer is what makes the difference:
 | **The volume moves** | Every note is shaped by where it sits in the phrase, how high it is, and where the beat falls — not stepped between eight printed marks. The melody is voiced above the accompaniment, as a pianist balances the hands. |
 | **The rhythm varies** | Accompaniments rest, hold, halve their motion, lean into a dotted lilt or turn over in triplets. Mazurkas lean on the second beat; Brahms writes hemiolas. |
 | **The harmony travels** | Sections modulate to real key relationships, coloured with applied dominants, borrowed chords and Neapolitans at rates drawn from each composer. |
+| **The melody is actually about something** | The whole line is spun continuously from one small cell — inverted, fragmented, sequenced, taken further — the way a real piece develops a theme, rather than a fresh, unrelated line generated bar by bar. |
+| **It engraves like a real page** | Eighth notes and shorter are beamed in proper metrical groups, not printed as isolated flagged notes. |
 
 ## Privacy
 
 Everything happens on your computer. Motif listens only to MuseScore, on your
-own machine, and your music is never sent anywhere.
+own machine, and your music is never sent anywhere. Asking Motif to continue,
+develop or change a piece you already have open writes the result back into
+that same file — it never leaves a second copy somewhere you'd have to go
+find.
 
 ## For developers
 

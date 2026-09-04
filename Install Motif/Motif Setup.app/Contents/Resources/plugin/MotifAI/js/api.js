@@ -60,6 +60,12 @@ function compose(base, token, payload, onDone) {
     return request(base, token, "POST", "/compose", payload, onDone);
 }
 
+// Polled while a composition is in flight, so the panel can show what Motif
+// is actually doing rather than a generic spinner.
+function progress(base, token, onDone) {
+    return request(base, token, "GET", "/progress", null, onDone);
+}
+
 function plan(base, token, payload, onDone) {
     return request(base, token, "POST", "/plan", payload, onDone);
 }

@@ -45,7 +45,7 @@ a diminished seventh as D–F–G♯–B instead of D–F–A♭–C♭.
 | `material.py` | Motifs as scale-degree steps, with inversion, retrograde, augmentation, fragmentation, sequence |
 | `progression.py` | Functional progressions coloured with applied dominants, borrowed chords, extensions |
 | `voicing.py` | Voicing search scored for parallels, spacing, doubling and tendency-tone resolution |
-| `melody.py` | Structural skeleton over a registral contour, then a scored fill |
+| `melody.py` | A contour skeleton for registral shape, then the whole line spun continuously from the seed motif — developing variation, not a fresh line generated note by note |
 | `textures.py` | 20 accompaniment idioms, each constrained to a playable hand span |
 | `orchestration.py` | Role-based distribution across 13 ensembles |
 | `composer.py` | Assembles all of it, adds pedalling, slurs, articulation |
@@ -73,6 +73,13 @@ a concerto stays a concerto; naming different or larger forces in the request
 ("continue this for a string quartet") is still honoured, and the merge adds
 the new parts silent for what was already written rather than pasting one
 instrument's line under another's name.
+
+`voice.py` owns the plain-language replies shown in the panel — several
+genuinely different phrasings per situation, chosen deterministically from
+the piece's own seed, rather than one fixed sentence filled in every time.
+It never touches a note. `VoiceModel` is an extension point for a future
+small local text model to rewrite these further; none is bundled today, so
+it is always `None` and the templates answer directly.
 
 ### `model/`
 
@@ -121,6 +128,24 @@ an incomplete bar is the one error that makes a score unusable.
 
 **Ranges are clamped last.** Octave doubling and register shifts compound, so a
 final pass folds any note outside the instrument's range back into it.
+
+**Beaming is computed, never trusted from the source.** `engrave/beaming.py`
+groups eighth notes and shorter within each metrical beat, breaking at rests
+and beat boundaries and hooking a lone shorter note against a longer
+neighbour. It is re-run over an entire score after a continuation merges in
+new material, because `musicxml_reader.py` does not restore `<beam>` from a
+reopened file — recomputing is cheap and keeps both halves looking like one
+piece.
+
+**A continuation edits the file you already have open.** When a request
+changes a piece that is already open — continuing, developing, harmonising,
+editing — the server writes the result back to that score's own path rather
+than a new file under `~/.motif/scores`; the panel is told this happened
+(`same_file` in the `/compose` response) and reloads that same path
+regardless of the "open automatically" preference, since leaving a stale
+version on screen while the file underneath it changed risks the next save
+overwriting Motif's work. A genuinely new, unrelated piece — even while a
+score happens to be open — always gets its own file.
 
 **Seeds are reproducible.** The same prompt and seed produce a byte-identical
 score; a different seed produces different music. "Try again" in the panel is

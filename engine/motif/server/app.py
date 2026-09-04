@@ -68,6 +68,7 @@ class MotifState:
         self.planner = None
         self.planner_name = "heuristic"
         self.lock = threading.Lock()
+        self.progress_text = ""
         self._load_model()
         self._load_planner()
         self.agent = MotifAgent(model=self.model, planner=self.planner)
@@ -166,6 +167,10 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/ensembles":
             return self._json(200, {"ok": True, "ensembles": [
                 {"id": k, "instruments": v} for k, v in ENSEMBLES.items()]})
+        if route == "/progress":
+            # Polled while the panel is waiting, so the musician sees what
+            # Motif is actually doing rather than a generic spinner.
+            return self._json(200, {"ok": True, "text": self.state.progress_text})
         return self._json(404, {"ok": False, "error": "not found"})
 
     def do_POST(self) -> None:
@@ -203,6 +208,7 @@ class Handler(BaseHTTPRequestHandler):
         req = Request(
             prompt=prompt[:4000],
             score_xml=body.get("score_xml") or None,
+            score_path=body.get("score_path") or None,
             seed=body.get("seed"),
             style=body.get("style") or None,
             ensemble=body.get("ensemble") or None,
@@ -210,7 +216,12 @@ class Handler(BaseHTTPRequestHandler):
             use_model=bool(body.get("use_model", True)))
         started = time.time()
         with self.state.lock:
-            result = self.state.agent.run(req)
+            self.state.progress_text = ""
+            try:
+                result = self.state.agent.run(
+                    req, progress=lambda text: setattr(self.state, "progress_text", text))
+            finally:
+                self.state.progress_text = ""
         if not result.ok:
             return self._json(200, {"ok": False, "error": result.error,
                                     "message": result.message,
@@ -223,14 +234,27 @@ class Handler(BaseHTTPRequestHandler):
             "warnings": result.warnings,
         }
         if result.musicxml:
-            stamp = time.strftime("%Y%m%d-%H%M%S")
-            title = _safe_name(result.plan.title if result.plan else "Motif")
-            xml_path = OUT_DIR / f"{title}-{stamp}.musicxml"
+            # A continuation, development, harmonisation or edit is a change
+            # to the piece the musician already has open — it belongs back
+            # in that same file, not in a new one they'd have to go find.
+            # A "create" is a genuinely new, unrelated piece even when a
+            # score happens to be open, so it always gets its own file.
+            existing_path = body.get("score_path") or ""
+            in_place = (result.intent in ("continue", "develop", "harmonize", "edit")
+                       and existing_path and Path(existing_path).is_file())
+            if in_place:
+                xml_path = Path(existing_path)
+                midi_path = xml_path.with_suffix(".mid")
+            else:
+                stamp = time.strftime("%Y%m%d-%H%M%S")
+                title = _safe_name(result.plan.title if result.plan else "Motif")
+                xml_path = OUT_DIR / f"{title}-{stamp}.musicxml"
+                midi_path = OUT_DIR / f"{title}-{stamp}.mid"
             xml_path.write_text(result.musicxml, encoding="utf-8")
             payload["musicxml"] = result.musicxml
             payload["musicxml_path"] = str(xml_path)
+            payload["same_file"] = in_place
             if result.midi:
-                midi_path = OUT_DIR / f"{title}-{stamp}.mid"
                 midi_path.write_bytes(result.midi)
                 payload["midi_path"] = str(midi_path)
                 payload["midi_base64"] = base64.b64encode(result.midi).decode("ascii")

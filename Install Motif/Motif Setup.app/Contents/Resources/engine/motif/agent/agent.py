@@ -13,6 +13,7 @@ from ..compose.composer import compose
 from ..compose.forms import build_sections
 from ..compose.orchestration import INSTRUMENTS, build_instruments
 from ..compose.styles import resolve_style
+from ..engrave.beaming import apply_beams
 from ..engrave.midi import to_midi
 from ..engrave.musicxml import to_musicxml
 from ..engrave.musicxml_reader import read_musicxml
@@ -23,6 +24,7 @@ from ..theory.pitch import Key
 from .analysis import ScoreAnalysis, analyse
 from .prompt_parser import ENSEMBLE_WORDS, parse_prompt, parse_key
 from .prompt_parser import _detect as _detect_ensemble
+from . import voice as _voice
 
 INTENTS = ("create", "continue", "develop", "harmonize", "edit", "analyze")
 
@@ -48,6 +50,7 @@ _ANALYZE_WORDS = ("analyze", "analyse", "what key", "what is this", "describe",
 class Request:
     prompt: str = ""
     score_xml: str | None = None
+    score_path: str | None = None        # the open score's own file, if it has one
     selection_start: int | None = None   # 1-based bar numbers
     selection_end: int | None = None
     seed: int | None = None
@@ -73,9 +76,11 @@ class Result:
 
 
 class MotifAgent:
-    def __init__(self, model=None, planner=None):
+    def __init__(self, model=None, planner=None, voice_model=None):
         self.model = model
         self.planner = planner       # optional LLM planner
+        self.voice_model = voice_model   # optional: rewrites the chat replies
+        self._progress = None        # set for the duration of a single run()
 
     # ------------------------------------------------------------------
     def classify(self, prompt: str, has_score: bool) -> str:
@@ -95,7 +100,11 @@ class MotifAgent:
         # A bare descriptive request with a score present means a new piece.
         return "create"
 
-    def run(self, req: Request) -> Result:
+    def run(self, req: Request, progress=None) -> Result:
+        # The caller already serialises requests through a single lock, so an
+        # instance attribute for "the callback for whichever run is
+        # currently happening" is safe rather than needing its own lock.
+        self._progress = progress
         started = time.time()
         try:
             existing: Score | None = None
@@ -144,7 +153,7 @@ class MotifAgent:
 
     def _finish(self, plan: CompositionPlan, message: str,
                 warnings: list[str] | None = None) -> Result:
-        score = compose(plan, self.model)
+        score = compose(plan, self.model, progress=self._progress)
         return Result(ok=True, message=message, musicxml=to_musicxml(score),
                       midi=to_midi(score), plan=plan, preview=summarise(score),
                       analysis=analyse(score).describe(), warnings=warnings or [])
@@ -153,7 +162,7 @@ class MotifAgent:
     def _create(self, req: Request, existing, info) -> Result:
         plan = self._plan_for(req)
         style = resolve_style(plan.style)
-        return self._finish(plan, _created_message(plan, style))
+        return self._finish(plan, _voice.created_message(plan, style, self.voice_model))
 
     def _continue(self, req: Request, existing: Score, info: ScoreAnalysis) -> Result:
         """Add new music that follows on from what is already written."""
@@ -192,11 +201,8 @@ class MotifAgent:
         result.musicxml = to_musicxml(merged)
         result.midi = to_midi(merged)
         result.preview = summarise(merged)
-        style_note = " in the same style" if info.style_is_exact else ""
-        result.message = (f"Continued **{existing.title}** with {bars} new bars in "
-                          f"{plan.key}, following the existing {info.time[0]}/"
-                          f"{info.time[1]} at ♩ = {int(plan.tempo)}{style_note}. "
-                          f"The new material develops the closing idea.")
+        result.message = _voice.continued_message(
+            plan, existing.title, bars, info, self.voice_model)
         return result
 
     def _develop(self, req: Request, existing: Score, info: ScoreAnalysis) -> Result:
@@ -216,9 +222,8 @@ class MotifAgent:
         for s in plan.sections:
             s.motif_op = "develop" if s.motif_op == "state" else s.motif_op
             s.energy = min(1.0, s.energy + 0.12)
-        return self._finish(plan, f"Developed the material from **{existing.title}** "
-                                  f"into a new {plan.form.replace('_', ' ')} of "
-                                  f"{plan.total_bars} bars in {plan.key}.")
+        return self._finish(plan, _voice.developed_message(
+            plan, existing.title, self.voice_model))
 
     def _harmonize(self, req: Request, existing: Score, info: ScoreAnalysis) -> Result:
         """Keep the user's melody, write an accompaniment underneath it."""
@@ -236,13 +241,11 @@ class MotifAgent:
                                        style, rng, bars)
         _fit_section_bars(plan.sections, bars)
 
-        generated = compose(plan, self.model)
+        generated = compose(plan, self.model, progress=self._progress)
         merged = _graft_melody(existing, generated)
-        return Result(ok=True, message=(
-            f"Harmonised {bars} bars of **{existing.title}** in {plan.key}. "
-            f"Your melody is untouched on the upper staff; the accompaniment "
-            f"is a {style.display}-style {plan.sections[0].texture_lh.replace('_', ' ')} "
-            f"left hand."),
+        message = _voice.harmonized_message(
+            plan, existing.title, bars, style, plan.sections[0].texture_lh, self.voice_model)
+        return Result(ok=True, message=message,
             musicxml=to_musicxml(merged), midi=to_midi(merged), plan=plan,
             preview=summarise(merged), analysis=analyse(merged).describe())
 
@@ -428,6 +431,14 @@ def _append_scores(base: Score, addition: Score) -> Score:
         if tm.measure > 1:
             base.tempos.append(type(tm)(tm.measure + offset, tm.bpm, tm.beat_unit,
                                         tm.text, tm.dotted))
+
+    # The reader that parsed ``base`` back in from disk never restores beam
+    # info (MusicXML leaves grouping entirely to each note), so the bars that
+    # already existed would otherwise print unbeamed even though the newly
+    # composed bars are. Recomputing over the whole score is cheap and keeps
+    # both halves looking like one piece.
+    for part in base.parts:
+        apply_beams(part, base.time)
     return base
 
 
@@ -538,24 +549,3 @@ def _fit_section_bars(sections: list[SectionPlan], total: int) -> None:
     sections[-1].bars = max(1, sections[-1].bars + drift)
 
 
-def _created_message(plan: CompositionPlan, style) -> str:
-    forces = {"solo_piano": "solo piano", "piano_concerto": "piano and orchestra",
-              "string_quartet": "string quartet", "piano_trio": "piano trio",
-              "string_orchestra": "string orchestra", "orchestra": "orchestra",
-              "violin_piano": "violin and piano", "cello_piano": "cello and piano",
-              "voice_piano": "voice and piano", "chamber": "chamber ensemble",
-              }.get(plan.ensemble, plan.ensemble.replace("_", " "))
-    bits = [f"**{plan.title}** — a {plan.total_bars}-bar "
-            f"{plan.form.replace('_', ' ')} for {forces} in {plan.key}, "
-            f"{plan.time[0]}/{plan.time[1]} at ♩ = {plan.tempo}"]
-    if plan.tempo_text:
-        bits.append(f" ({plan.tempo_text})")
-    bits.append(f", written in a {style.display} idiom.")
-    if plan.character:
-        bits.append(f" Character: {plan.character}.")
-    labels = " → ".join(s.label for s in plan.sections[:9])
-    if labels:
-        bits.append(f"\n\nStructure: {labels}.")
-    if plan.notes:
-        bits.append(f"\n\n_{plan.notes}_")
-    return "".join(bits)
