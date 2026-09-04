@@ -287,11 +287,10 @@ def _lighten(colour: str) -> str:
 # ---------------------------------------------------------------------------
 # Making sure the user always sees *something*
 #
-# A double-clicked app has nowhere for printed text to appear: anything
-# written to stdout is invisible, and a process that raises and exits just
-# looks like it "bounced once and quit" with no explanation. Every path
-# below ends in either a real window or a native OS dialog box — never a
-# bare print.
+# A double-clicked app has no attached terminal: anything printed to stdout
+# is invisible, and a process that raises and exits just looks like it
+# "bounced once and quit" with no explanation. Every path below ends in
+# either a real window or a native OS dialog box — never a bare print.
 # ---------------------------------------------------------------------------
 def _log(text: str) -> None:
     try:
@@ -351,8 +350,7 @@ def _applescript_str(text: str) -> str:
 
 def run_console(argv: list[str]) -> int:
     """Used when the machine has no windowing toolkit at all — still prints,
-    for the case where this is genuinely being run by hand rather than by
-    double-clicking."""
+    for the case where this genuinely is run from a terminal."""
     action = "remove" if "--remove" in argv else "install"
 
     def report(message, fraction):

@@ -1,18 +1,43 @@
 #!/bin/bash
-# Locate the Motif folder relative to this bundle and open Setup.
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+# Everything Setup needs lives inside this bundle, so it works no
+# matter where the app itself has been moved to.
+RES="$(cd "$(dirname "${BASH_SOURCE[0]}")/../Resources" && pwd)"
+TARGET="$RES/setup/motif_setup.py"
+
+alert() {
+  osascript -e "display alert \"Motif Setup\" message \"$1\" as critical" \
+    >/dev/null 2>&1
+}
+
+if [ ! -f "$TARGET" ]; then
+  alert "This copy of Motif Setup looks incomplete. Please re-download it and try again."
+  exit 1
+fi
 
 # /usr/bin/python3 on a current Mac is a stub that only offers to
 # install developer tools, so each candidate is asked to actually run
 # before it is trusted.
-for PY in /opt/homebrew/bin/python3 /usr/local/bin/python3 \
-         /Library/Frameworks/Python.framework/Versions/Current/bin/python3 \
-         python3; do
-  if command -v "$PY" >/dev/null 2>&1 && \
-     "$PY" -c "import sys" >/dev/null 2>&1; then
-    exec "$PY" "$HERE/setup/motif_setup.py" "$@"
+PY=""
+for CAND in /opt/homebrew/bin/python3 /usr/local/bin/python3 \
+           /Library/Frameworks/Python.framework/Versions/Current/bin/python3 \
+           python3; do
+  if command -v "$CAND" >/dev/null 2>&1 && \
+     "$CAND" -c "import sys" >/dev/null 2>&1; then
+    PY="$CAND"
+    break
   fi
 done
 
-osascript -e 'display alert "One more step" message "Motif needs a free component this Mac does not have yet. Choose Get it to download it, then open Motif Setup again." buttons {"Not now", "Get it"} default button "Get it"' \
-  | grep -q "Get it" && open "https://www.python.org/downloads/macos/"
+if [ -z "$PY" ]; then
+  RESP=$(osascript -e 'display alert "One more step" message "Motif needs a free component this Mac does not have yet. Choose Get it to download it, then open Motif Setup again." buttons {"Not now", "Get it"} default button "Get it"' 2>/dev/null)
+  echo "$RESP" | grep -q "Get it" && \
+    open "https://www.python.org/downloads/macos/"
+  exit 1
+fi
+
+"$PY" "$TARGET" "$@"
+STATUS=$?
+if [ $STATUS -ne 0 ]; then
+  alert "Setup ran into a problem. Details were saved to ~/.motif/setup-log.txt. Please try again, or get in touch for help."
+fi
+exit $STATUS
