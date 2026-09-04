@@ -76,6 +76,24 @@ ENSEMBLES: dict[str, list[str]] = {
 }
 
 
+#: How each ensemble is described to the musician.
+ENSEMBLE_NAMES: dict[str, str] = {
+    "solo_piano": "Solo piano",
+    "piano_concerto": "Piano and orchestra",
+    "orchestra": "Orchestra",
+    "string_quartet": "String quartet",
+    "string_orchestra": "String orchestra",
+    "piano_trio": "Piano trio",
+    "chamber": "Chamber ensemble",
+    "violin_piano": "Violin and piano",
+    "cello_piano": "Cello and piano",
+    "voice_piano": "Voice and piano",
+    "organ": "Organ",
+    "harpsichord": "Harpsichord",
+    "guitar": "Guitar",
+}
+
+
 def orchestrate(composer, score: Score, parts: list[Part], sec: SectionPlan,
                 key: Key, timeline: HarmonyTimeline, melody: list[Note],
                 start_tick: int, bar_ticks: int, beat_ticks: int) -> None:

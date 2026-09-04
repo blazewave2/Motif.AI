@@ -64,6 +64,26 @@ function plan(base, token, payload, onDone) {
     return request(base, token, "POST", "/plan", payload, onDone);
 }
 
+// The composer and ensemble lists that fill the preference pickers.
+function choices(base, token, onDone) {
+    return request(base, token, "GET", "/choices", null, onDone);
+}
+
+function savePrefs(base, token, prefs, onDone) {
+    return request(base, token, "POST", "/preferences", prefs, onDone);
+}
+
+function prefsFromConfig(rawText) {
+    if (!rawText || rawText.length === 0)
+        return null;
+    try {
+        var cfg = JSON.parse(rawText);
+        return cfg.preferences || null;
+    } catch (e) {
+        return null;
+    }
+}
+
 // Pull the shared token out of ~/.motif/config.json without a JSON parse
 // failure taking the panel down.
 function tokenFromConfig(rawText) {

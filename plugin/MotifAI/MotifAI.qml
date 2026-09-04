@@ -1,11 +1,9 @@
 //=============================================================================
-//  Motif.AI — a generative, agentic composing partner for MuseScore
+//  Motif.AI — your AI composing partner, inside MuseScore
 //
-//  The panel talks to a local Motif engine over HTTP on the loopback
-//  interface.  Generated music arrives as MusicXML, which MuseScore imports
-//  with far higher fidelity than a plugin can achieve through the cursor API:
-//  slurs, pedalling, hairpins, tuplets and multi-voice piano writing all
-//  survive intact.
+//  Music arrives as MusicXML, which MuseScore imports far more faithfully than
+//  a plugin can build a score note by note: slurs, pedalling, hairpins,
+//  tuplets and multi-voice piano writing all survive intact.
 //=============================================================================
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
@@ -27,24 +25,30 @@ MuseScore {
     requiresScore: false
     thumbnailName: "assets/thumbnail.png"
 
-    implicitWidth: 330
+    implicitWidth: 340
     implicitHeight: 900
     width: implicitWidth
     height: implicitHeight
 
-    // -- state ------------------------------------------------------------
+    // -- connection -------------------------------------------------------
     property string serverUrl: "http://127.0.0.1:8765"
     property string apiToken: ""
+    property string connState: "checking"      // checking | ready | offline
+    property string versionText: ""
+    property int wakeAttempts: 0
+
+    // -- preferences ------------------------------------------------------
     property string styleOverride: ""
     property string ensembleOverride: ""
-    property string connState: "checking"      // checking | ready | offline | error
-    property string connDetail: ""
-    property string engineInfo: ""
+    property bool autoOpen: true
+    property var styleOptions: []
+    property var ensembleOptions: []
+
+    // -- session ----------------------------------------------------------
     property bool busy: false
-    property int view: 0                       // 0 create, 1 chat
+    property int view: 0                       // 0 create, 1 conversation
     property bool settingsOpen: false
     property string lastPrompt: ""
-    property string pendingXmlPath: ""
     property int seedCounter: 0
 
     ListModel { id: conversation }
@@ -54,13 +58,13 @@ MuseScore {
     FileIO { id: scoreIn }
 
     readonly property var examples: [
-        { l1: "Compose a romantic piano piece",  l2: "in the style of Chopin",
+        { l1: "Compose a romantic piano piece",   l2: "in the style of Chopin",
           prompt: "Compose a romantic piano piece in the style of Chopin" },
         { l1: "Create a joyful and uplifting melody", l2: "in 6/8 time",
           prompt: "Create a joyful and uplifting melody in 6/8 time" },
-        { l1: "Write a short film score",        l2: "for a mysterious forest scene",
+        { l1: "Write a short film score",         l2: "for a mysterious forest scene",
           prompt: "Write a short film score for a mysterious forest scene" },
-        { l1: "Continue this piece",             l2: "in a more dramatic way",
+        { l1: "Continue this piece",              l2: "in a more dramatic way",
           prompt: "Continue this piece in a more dramatic way" },
         { l1: "Add a contrasting middle section", l2: "in a minor key",
           prompt: "Add a contrasting middle section in a minor key" }
@@ -69,57 +73,97 @@ MuseScore {
     //=========================================================================
     //  Lifecycle
     //=========================================================================
-    onRun: {
-        loadConfig();
-        checkHealth();
-    }
-    Component.onCompleted: {
-        loadConfig();
+    onRun: start()
+    Component.onCompleted: start()
+
+    function start() {
+        loadSettings();
+        wakeAttempts = 0;
         checkHealth();
     }
 
-    function configDir() {
+    function motifFolder() {
         var home = "";
         try { home = configFile.homePath(); } catch (e) { home = ""; }
-        if (!home || home.length === 0)
-            return "";
-        return home + "/.motif";
+        return home && home.length ? home + "/.motif" : "";
     }
 
-    // The engine writes its port and token to ~/.motif/config.json on first
-    // run, so the panel configures itself with nothing for the user to copy.
-    function loadConfig() {
-        var dir = configDir();
-        if (dir.length === 0)
+    // Motif writes where it is listening the first time it runs, so the panel
+    // configures itself and the musician never sees an address or a key.
+    function loadSettings() {
+        var dir = motifFolder();
+        if (!dir.length)
             return;
         configFile.source = dir + "/config.json";
         var raw = "";
         try { raw = configFile.read(); } catch (e) { raw = ""; }
-        if (!raw || raw.length === 0)
+        if (!raw || !raw.length)
             return;
         var tok = Api.tokenFromConfig(raw);
-        var port = Api.portFromConfig(raw, 8765);
-        if (tok.length > 0)
+        if (tok.length)
             root.apiToken = tok;
-        root.serverUrl = "http://127.0.0.1:" + port;
+        root.serverUrl = "http://127.0.0.1:" + Api.portFromConfig(raw, 8765);
+        var prefs = Api.prefsFromConfig(raw);
+        if (prefs) {
+            root.styleOverride = prefs.style || "";
+            root.ensembleOverride = prefs.ensemble || "";
+            if (prefs.auto_open !== undefined)
+                root.autoOpen = !!prefs.auto_open;
+        }
+    }
+
+    function savePreferences() {
+        Api.savePrefs(root.serverUrl, root.apiToken, {
+            style: root.styleOverride,
+            ensemble: root.ensembleOverride,
+            auto_open: root.autoOpen
+        }, function (res) { /* preferences are a convenience, never a blocker */ });
+    }
+
+    // Motif starts with the computer, so a failed first call usually means it
+    // is still coming up. Retry quietly for a while before saying anything.
+    Timer {
+        id: wakeTimer
+        interval: 1200
+        repeat: false
+        onTriggered: root.checkHealth()
     }
 
     function checkHealth() {
-        root.connState = "checking";
+        if (root.connState !== "ready")
+            root.connState = "checking";
         Api.health(root.serverUrl, root.apiToken, function (res) {
-            if (!res || res.ok !== true) {
-                root.connState = res && res.offline ? "offline" : "error";
-                root.connDetail = (res && res.error)
-                    ? res.error : "The Motif engine did not respond.";
-                root.engineInfo = "";
+            if (res && res.ok === true) {
+                root.connState = "ready";
+                root.wakeAttempts = 0;
+                root.versionText = "Version " + res.version;
+                loadChoices();
                 return;
             }
-            root.connState = "ready";
-            root.connDetail = "";
-            root.engineInfo = "Motif engine " + res.version
-                + "\nmode: " + res.engine
-                + "\nplanner: " + res.planner
-                + (res.model_error ? "\nmodel: " + res.model_error : "");
+            root.wakeAttempts += 1;
+            if (root.wakeAttempts < 8) {
+                wakeTimer.interval = Math.min(4000, 700 * root.wakeAttempts);
+                wakeTimer.restart();
+            } else {
+                root.connState = "offline";
+            }
+        });
+    }
+
+    function loadChoices() {
+        if (root.styleOptions.length > 0)
+            return;
+        Api.choices(root.serverUrl, root.apiToken, function (res) {
+            if (!res || res.ok !== true)
+                return;
+            var styles = [{ id: "", name: "Let Motif choose" }];
+            for (var i = 0; i < res.styles.length; ++i)
+                styles.push({ id: res.styles[i].id, name: res.styles[i].name });
+            root.styleOptions = styles;
+            var ens = [{ id: "", name: "Let Motif choose" }];
+            for (var j = 0; j < res.ensembles.length; ++j)
+                ens.push({ id: res.ensembles[j].id, name: res.ensembles[j].name });
+            root.ensembleOptions = ens;
         });
     }
 
@@ -131,15 +175,14 @@ MuseScore {
         return Math.floor(Math.random() * 1000000) + root.seedCounter;
     }
 
-    // Export whatever is open so the engine can answer questions about it.
+    // Hand Motif whatever is open, so it can answer questions about it and
+    // carry on from it.
     function currentScoreXml() {
         if (typeof curScore === "undefined" || curScore === null)
             return "";
-        var path = "";
         try {
-            path = scoreOut.tempPath() + "/motif-context-" + Date.now() + ".musicxml";
-            var wrote = writeScore(curScore, path, "musicxml");
-            if (wrote === false)
+            var path = scoreOut.tempPath() + "/motif-context-" + Date.now() + ".musicxml";
+            if (writeScore(curScore, path, "musicxml") === false)
                 return "";
             scoreIn.source = path;
             var text = scoreIn.read();
@@ -158,85 +201,88 @@ MuseScore {
         root.view = 1;
         if (!isRetry)
             appendMessage("user", promptText, "", false);
-        appendMessage("pending", "Composing…", "", false);
+        appendMessage("pending", "", "", false);
 
-        var payload = {
-            prompt: promptText,
-            seed: nextSeed(),
-            score_xml: currentScoreXml()
-        };
-        if (root.styleOverride.length > 0) payload.style = root.styleOverride;
-        if (root.ensembleOverride.length > 0) payload.ensemble = root.ensembleOverride;
+        var payload = { prompt: promptText, seed: nextSeed(),
+                        score_xml: currentScoreXml() };
+        if (root.styleOverride.length)
+            payload.style = root.styleOverride;
+        if (root.ensembleOverride.length)
+            payload.ensemble = root.ensembleOverride;
 
         Api.compose(root.serverUrl, root.apiToken, payload, function (res) {
             root.busy = false;
             removePending();
             if (!res || res.ok !== true) {
-                var msg = (res && res.error) ? res.error
-                                             : "Motif could not complete that request.";
                 if (res && res.offline) {
                     root.connState = "offline";
-                    msg = "The Motif engine is not running. Start it with "
-                        + "<b>motif serve</b> and try again.";
+                    appendMessage("error",
+                        "Motif isn’t answering just now. Give it a moment and try again.",
+                        "", false);
+                } else {
+                    appendMessage("error",
+                        (res && res.error) ? res.error
+                                           : "Motif couldn’t finish that one. Try rewording it.",
+                        "", false);
                 }
-                appendMessage("error", msg, "", false);
                 return;
             }
             root.connState = "ready";
-            var detail = planSummary(res.plan);
-            appendMessage("assistant", res.message || "Done.", detail,
-                          !!res.musicxml_path);
+            appendMessage("assistant", res.message || "Done.",
+                          describe(res.plan), !!res.musicxml_path);
             conversation.setProperty(conversation.count - 1, "xmlPath",
                                      res.musicxml_path || "");
-            if (res.musicxml_path && res.musicxml_path.length > 0) {
-                root.pendingXmlPath = res.musicxml_path;
+            if (root.autoOpen && res.musicxml_path && res.musicxml_path.length)
                 openScore(res.musicxml_path);
-            }
         });
     }
 
-    function planSummary(plan) {
+    // A plain-language summary of the choices Motif made, shown on request.
+    function describe(plan) {
         if (!plan)
             return "";
         var lines = [];
-        lines.push("style     " + plan.style);
-        lines.push("key       " + plan.key);
-        lines.push("metre     " + plan.time[0] + "/" + plan.time[1]);
-        lines.push("tempo     " + plan.tempo + (plan.tempo_text ? "  " + plan.tempo_text : ""));
-        lines.push("form      " + plan.form);
-        lines.push("forces    " + plan.ensemble);
-        lines.push("seed      " + plan.seed);
-        var secs = [];
+        lines.push("Key         " + plan.key);
+        lines.push("Time        " + plan.time[0] + "/" + plan.time[1]);
+        lines.push("Tempo       " + plan.tempo
+                   + (plan.tempo_text ? "   " + plan.tempo_text : ""));
+        lines.push("Form        " + prettify(plan.form));
+        lines.push("Written for " + prettify(plan.ensemble));
+        lines.push("");
         for (var i = 0; i < plan.sections.length; ++i) {
             var s = plan.sections[i];
-            secs.push(s.label + " " + s.bars + "b " + s.key
-                      + " [" + s.texture_lh + "]");
+            lines.push("  " + pad(s.label, 12) + pad(s.bars + " bars", 10) + s.key);
         }
-        lines.push("");
-        lines.push(secs.join("\n"));
         return lines.join("\n");
     }
 
-    // MuseScore opens the generated MusicXML in a new tab.  If the host build
-    // does not expose readScore to plugins we say where the file is instead of
-    // failing silently.
+    function prettify(id) {
+        if (!id) return "";
+        var t = id.replace(/_/g, " ");
+        return t.charAt(0).toUpperCase() + t.slice(1);
+    }
+
+    function pad(text, n) {
+        var s = String(text);
+        while (s.length < n) s += " ";
+        return s;
+    }
+
     function openScore(path) {
         var opened = false;
         try {
             var s = readScore(path);
             if (s) {
                 opened = true;
-                try { setScore(s); } catch (e2) { /* older hosts open it directly */ }
+                try { setScore(s); } catch (e2) { /* some hosts open it directly */ }
             }
         } catch (e) {
             opened = false;
         }
-        if (!opened) {
+        if (!opened)
             appendMessage("system",
-                "The score is saved at <b>" + path + "</b>. "
-                + "Open it with File ▸ Open if it did not appear automatically.",
-                "", false);
-        }
+                "Your score is saved in the Motif folder in your Documents. "
+                + "Open it from there if it didn’t appear.", "", false);
     }
 
     function appendMessage(role, text, detail, hasScore) {
@@ -260,6 +306,16 @@ MuseScore {
         promptBox.clear();
     }
 
+    function showHelp() {
+        appendMessage("system",
+            "Motif starts by itself when you sign in, so it is normally ready "
+            + "whenever MuseScore is.<br><br>"
+            + "If it stays quiet, open <b>Motif Setup</b> from your Applications "
+            + "folder and choose <b>Repair</b>. That takes a few seconds and "
+            + "puts everything back.", "", false);
+        root.view = 1;
+    }
+
     //=========================================================================
     //  Layout
     //=========================================================================
@@ -267,27 +323,27 @@ MuseScore {
         anchors.fill: parent
         color: T.bg
 
-        // ---- settings ---------------------------------------------------
+        // ---- preferences -------------------------------------------------
         Flickable {
             anchors { fill: parent; margins: T.pad }
             visible: root.settingsOpen
-            contentHeight: settings.implicitHeight
+            contentHeight: settings.implicitHeight + T.pad
             clip: true
             SettingsPanel {
                 id: settings
                 width: parent.width
-                serverUrl: root.serverUrl
-                token: root.apiToken
+                styleOptions: root.styleOptions
+                ensembleOptions: root.ensembleOptions
                 styleOverride: root.styleOverride
                 ensembleOverride: root.ensembleOverride
-                engineInfo: root.engineInfo
-                configPath: root.configDir() + "/config.json"
-                onSaved: function (url, tok, styleId, ensembleId) {
-                    root.serverUrl = url;
-                    root.apiToken = tok;
+                autoOpen: root.autoOpen
+                versionText: root.versionText
+                connected: root.connState === "ready"
+                onChanged: function (styleId, ensembleId, openAutomatically) {
                     root.styleOverride = styleId;
                     root.ensembleOverride = ensembleId;
-                    root.checkHealth();
+                    root.autoOpen = openAutomatically;
+                    root.savePreferences();
                 }
                 onClosed: root.settingsOpen = false
             }
@@ -298,7 +354,6 @@ MuseScore {
             spacing: 0
             visible: !root.settingsOpen
 
-            // ---- scrolling body -----------------------------------------
             Flickable {
                 id: scroller
                 Layout.fillWidth: true
@@ -314,7 +369,6 @@ MuseScore {
                     width: scroller.width - T.pad * 2
                     spacing: 16
 
-                    // -- landing ------------------------------------------
                     BrandHeader {
                         width: parent.width
                         visible: root.view === 0
@@ -323,9 +377,8 @@ MuseScore {
                     StatusStrip {
                         width: parent.width
                         status: root.connState
-                        detail: root.connDetail
-                        onRetryRequested: root.checkHealth()
-                        onHelpRequested: root.showStartHelp()
+                        onRetryRequested: { root.wakeAttempts = 0; root.checkHealth(); }
+                        onHelpRequested: root.showHelp()
                     }
 
                     Text {
@@ -370,7 +423,6 @@ MuseScore {
                         }
                     }
 
-                    // -- conversation -------------------------------------
                     Column {
                         id: chatColumn
                         width: body.width
@@ -404,33 +456,7 @@ MuseScore {
                                 }
                                 Component {
                                     id: pendingRow
-                                    Row {
-                                        spacing: 8
-                                        Sparkle {
-                                            width: 11; height: 11
-                                            color: T.gold
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            RotationAnimator on rotation {
-                                                from: 0; to: 360
-                                                duration: 2600
-                                                loops: Animation.Infinite
-                                                running: root.busy
-                                            }
-                                        }
-                                        Text {
-                                            text: "Composing…"
-                                            color: T.textMuted
-                                            font.family: T.sans
-                                            font.pixelSize: T.fsBody
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            SequentialAnimation on opacity {
-                                                loops: Animation.Infinite
-                                                running: root.busy
-                                                NumberAnimation { to: 0.45; duration: 700 }
-                                                NumberAnimation { to: 1.0;  duration: 700 }
-                                            }
-                                        }
-                                    }
+                                    Thinking { active: root.busy }
                                 }
                             }
                         }
@@ -443,7 +469,7 @@ MuseScore {
                 }
             }
 
-            // ---- follow-up composer (chat view) --------------------------
+            // ---- follow-up ----------------------------------------------
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: followUp.implicitHeight + T.pad
@@ -468,28 +494,28 @@ MuseScore {
                 }
             }
 
-            // ---- new chat ------------------------------------------------
+            // ---- new chat -------------------------------------------------
             Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 46
 
                 Rectangle {
-                    anchors { left: parent.left; right: parent.right; top: parent.top }
-                    anchors.leftMargin: T.pad
-                    anchors.rightMargin: T.pad
+                    anchors { left: parent.left; right: parent.right; top: parent.top
+                              leftMargin: T.pad; rightMargin: T.pad }
                     height: 1
                     color: T.border
                 }
                 Row {
                     anchors.centerIn: parent
-                    spacing: 7
-                    Sparkle {
-                        width: 11; height: 11
-                        color: T.gold
+                    spacing: 9
+                    PhraseMark {
+                        width: 20; height: 9
+                        color: newChatArea.containsMouse ? T.gold : T.goldDim
+                        weight: 1.5
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Text {
-                        text: "New chat"
+                        text: "New piece"
                         color: newChatArea.containsMouse ? T.text : T.textMuted
                         font.family: T.sans
                         font.pixelSize: T.fsBody
@@ -514,13 +540,14 @@ MuseScore {
             }
         }
 
-        // ---- settings affordance ----------------------------------------
+        // ---- preferences affordance --------------------------------------
         Rectangle {
             anchors { top: parent.top; right: parent.right; margins: 8 }
-            width: 26; height: 26
+            width: 28; height: 28
             radius: T.radiusSm
             color: gearArea.containsMouse ? T.surface : "transparent"
             visible: !root.settingsOpen
+            Behavior on color { ColorAnimation { duration: T.durFast } }
             Text {
                 anchors.centerIn: parent
                 text: "⚙"
@@ -535,15 +562,5 @@ MuseScore {
                 onClicked: root.settingsOpen = true
             }
         }
-    }
-
-    function showStartHelp() {
-        appendMessage("system",
-            "Start the engine from a terminal:<br><br>"
-            + "<b>python3 -m motif serve</b><br><br>"
-            + "It listens on 127.0.0.1 only and writes its port and token to "
-            + "<b>~/.motif/config.json</b>, which this panel reads automatically. "
-            + "Then press Retry.", "", false);
-        root.view = 1;
     }
 }

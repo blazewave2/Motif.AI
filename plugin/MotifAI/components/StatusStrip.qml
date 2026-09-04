@@ -35,19 +35,19 @@ Rectangle {
             font.pixelSize: T.fsTiny
             lineHeight: 1.3
             text: strip.status === "checking"
-                  ? "Connecting to the Motif engine…"
+                  ? "Waking Motif…"
                   : strip.status === "offline"
-                  ? "The Motif engine is not running. Start it with <b>motif serve</b> "
-                    + "in a terminal, then press Retry."
+                  ? "Motif isn\'t answering yet. It usually starts on its own a "
+                    + "moment after you sign in."
                   : strip.detail
             textFormat: Text.StyledText
         }
         Row {
             spacing: 7
             visible: strip.status !== "checking"
-            SmallButton { label: "Retry"; onClicked: strip.retryRequested() }
-            SmallButton { label: "How to start it"
-                          onClicked: strip.helpRequested() }
+            SmallButton { label: "Try again"; primary: true
+                          onClicked: strip.retryRequested() }
+            SmallButton { label: "Help"; onClicked: strip.helpRequested() }
         }
     }
 }

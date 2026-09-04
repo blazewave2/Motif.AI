@@ -42,19 +42,20 @@ Item {
             spacing: 8
 
             Row {
-                spacing: 6
+                spacing: 7
                 visible: !bubble.isUser
-                Sparkle {
-                    width: 9; height: 9
+                PhraseMark {
+                    width: 18; height: 8
                     color: bubble.role === "error" ? T.danger : T.gold
+                    weight: 1.4
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
-                    text: bubble.role === "error" ? "Motif.AI — problem" : "Motif.AI"
+                    text: "Motif.AI"
                     color: bubble.role === "error" ? T.danger : T.goldDim
-                    font.family: T.sans
-                    font.pixelSize: T.fsTiny
-                    font.letterSpacing: 0.5
+                    font.family: T.serif
+                    font.pixelSize: T.fsSmall
+                    font.letterSpacing: 0.3
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
@@ -96,16 +97,16 @@ Item {
                 visible: bubble.showActions && bubble.hasScore
 
                 SmallButton {
-                    label: "Open in MuseScore"
+                    label: "Open the score"
                     primary: true
                     onClicked: bubble.openRequested()
                 }
                 SmallButton {
-                    label: "Try again"
+                    label: "Another take"
                     onClicked: bubble.regenerateRequested()
                 }
                 SmallButton {
-                    label: bubble.detailOpen ? "Hide plan" : "Plan"
+                    label: bubble.detailOpen ? "Hide details" : "Details"
                     visible: bubble.detail.length > 0
                     onClicked: bubble.detailOpen = !bubble.detailOpen
                 }

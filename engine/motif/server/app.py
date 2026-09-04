@@ -19,7 +19,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from ..agent.agent import MotifAgent, Request
-from ..compose.orchestration import ENSEMBLES
+from ..compose.orchestration import ENSEMBLES, ENSEMBLE_NAMES
 from ..compose.styles import STYLES
 
 VERSION = "1.0.0"
@@ -166,6 +166,16 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/ensembles":
             return self._json(200, {"ok": True, "ensembles": [
                 {"id": k, "instruments": v} for k, v in ENSEMBLES.items()]})
+        if route == "/choices":
+            return self._json(200, {
+                "ok": True,
+                "styles": [{"id": n, "name": p.display}
+                           for n, p in sorted(STYLES.items(),
+                                              key=lambda kv: kv[1].display)],
+                "ensembles": [{"id": k, "name": ENSEMBLE_NAMES.get(k, k)}
+                              for k in ENSEMBLES],
+                "preferences": self.state.cfg.get("preferences", {}),
+            })
         return self._json(404, {"ok": False, "error": "not found"})
 
     def do_POST(self) -> None:
@@ -183,6 +193,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._compose(body)
         if route == "/plan":
             return self._plan(body)
+        if route == "/preferences":
+            return self._preferences(body)
         if route == "/shutdown":
             threading.Timer(0.2, self.server.shutdown).start()
             return self._json(200, {"ok": True, "message": "shutting down"})
@@ -193,12 +205,13 @@ class Handler(BaseHTTPRequestHandler):
         prompt = (body.get("prompt") or "").strip()
         if not prompt:
             return self._json(400, {"ok": False, "error": "prompt is required"})
+        prefs = self.state.cfg.get("preferences", {})
         req = Request(
             prompt=prompt[:4000],
             score_xml=body.get("score_xml") or None,
             seed=body.get("seed"),
-            style=body.get("style") or None,
-            ensemble=body.get("ensemble") or None,
+            style=body.get("style") or prefs.get("style") or None,
+            ensemble=body.get("ensemble") or prefs.get("ensemble") or None,
             history=body.get("history") or [],
             use_model=bool(body.get("use_model", True)))
         started = time.time()
@@ -231,6 +244,23 @@ class Handler(BaseHTTPRequestHandler):
             payload["plan"] = json.loads(result.plan.to_json())
             payload["title"] = result.plan.title
         return self._json(200, payload)
+
+    def _preferences(self, body: dict) -> None:
+        """Remember the musician's choices between sessions."""
+        prefs = self.state.cfg.setdefault("preferences", {})
+        style = body.get("style")
+        if isinstance(style, str):
+            prefs["style"] = style if style in STYLES else ""
+        ensemble = body.get("ensemble")
+        if isinstance(ensemble, str):
+            prefs["ensemble"] = ensemble if ensemble in ENSEMBLES else ""
+        if "auto_open" in body:
+            prefs["auto_open"] = bool(body["auto_open"])
+        try:
+            (CONFIG_DIR / "config.json").write_text(json.dumps(self.state.cfg, indent=2))
+        except OSError as exc:
+            return self._json(200, {"ok": False, "error": str(exc)})
+        return self._json(200, {"ok": True, "preferences": prefs})
 
     def _plan(self, body: dict) -> None:
         from ..agent.prompt_parser import parse_prompt
