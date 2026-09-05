@@ -73,6 +73,9 @@ class Result:
     elapsed_ms: int = 0
     error: str = ""
     warnings: list[str] = field(default_factory=list)
+    #: The musician had a score open but it was still blank. A new piece
+    #: belongs in that empty page rather than in a second tab beside it.
+    open_score_empty: bool = False
 
 
 class MotifAgent:
@@ -116,8 +119,10 @@ class MotifAgent:
                     # the request as a fresh piece rather than refusing it.
                     existing = None
             info = analyse(existing) if existing is not None else None
+            open_score_empty = False
             if info is not None and info.is_empty:
                 existing, info = None, None
+                open_score_empty = True
 
             intent = self.classify(req.prompt, existing is not None)
             handler = {
@@ -127,6 +132,7 @@ class MotifAgent:
             }[intent]
             result = handler(req, existing, info)
             result.intent = intent
+            result.open_score_empty = open_score_empty
             result.elapsed_ms = int((time.time() - started) * 1000)
             return result
         except Exception as exc:              # never crash the plugin

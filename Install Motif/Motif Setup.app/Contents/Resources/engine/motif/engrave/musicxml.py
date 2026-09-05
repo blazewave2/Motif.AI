@@ -461,8 +461,12 @@ class MusicXMLWriter:
                 self._leaf("stem", n.stem)
             if multi_staff:
                 self._leaf("staff", staff)
-            for level, kind in enumerate(n.beam, start=1):
-                self._leaf("beam", kind, f'number="{level}"')
+            # A beam belongs to the chord, not to each notehead in it: it is
+            # written once, on the note that starts the chord. Repeating it on
+            # every <chord/> note makes readers reject the chord outright.
+            if i == 0 and not n.grace:
+                for level, kind in enumerate(n.beam, start=1):
+                    self._leaf("beam", kind, f'number="{level}"')
             self._notations(n, first_notehead=(i == 0))
             self._close("note")
 

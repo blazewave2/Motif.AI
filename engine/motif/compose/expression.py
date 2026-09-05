@@ -35,6 +35,27 @@ RIT_WORDS = ["rit.", "poco rit.", "ritardando", "cedendo", "allargando"]
 ACCEL_WORDS = ["accel.", "poco accel.", "stringendo", "animando", "più mosso"]
 
 
+def _thin_tempo_marks(marks: list[TempoMark], min_gap: int) -> list[TempoMark]:
+    """Keep the page readable: one mark per bar, none crowding another.
+
+    Two tempo marks a bar apart are unplayable as written and unreadable as
+    printed; the opening mark is always kept.
+    """
+    marks = sorted(marks, key=lambda t: t.measure)
+    out: list[TempoMark] = []
+    for m in marks:
+        if not out:
+            out.append(m)
+            continue
+        if m.measure == out[-1].measure:
+            out[-1] = m
+        elif m.measure - out[-1].measure >= min_gap and round(m.bpm) != round(out[-1].bpm):
+            # A mark that restores a tempo nothing ever left says nothing —
+            # it happens when the change it answers was thinned away.
+            out.append(m)
+    return out
+
+
 @dataclass
 class Phrase:
     """One breath of music, used to shape both tempo and volume."""
@@ -124,17 +145,25 @@ class ExpressionPlanner:
         r = self.rubato
         # The opening tempo is always stated; only the give and take is
         # stylistic. A Baroque movement holds its pulse but still has a tempo.
-        out.append(TempoMark(1, round(self.base_tempo, 1)))
+        out.append(TempoMark(1, round(self.base_tempo)))
         if r < 0.05:
             if sections:
                 total = bar_offsets[-1] + sections[-1].bars
                 out.append(TempoMark(max(1, total - 1),
-                                     round(self.base_tempo * 0.94, 1), text="rit."))
-            return out
+                                     round(self.base_tempo * 0.94), text="rit."))
+            return _thin_tempo_marks(out, min_gap=4)
 
+        # A printed tempo change is a structural event, not a per-phrase
+        # decoration. A nocturne carries one tempo, perhaps a slower middle,
+        # and a rit. at the close — pages littered with marks every few bars
+        # (and changes of two or three beats a minute, which no player can
+        # even act on) are the clearest sign a machine set the page.
+        total_bars = (bar_offsets[-1] + sections[-1].bars) if sections else 0
+        prev_tempo = self.base_tempo
         for sec, first_bar in zip(sections, bar_offsets):
+            if first_bar == 0:
+                continue
             tempo = self.base_tempo * sec.tempo_scale
-            # Lyrical middles relax; developments and codas press forward.
             if sec.role in ("theme",) and sec.energy < 0.45:
                 tempo *= 1.0 - r * 0.45
             elif sec.role in ("development", "transition"):
@@ -143,43 +172,28 @@ class ExpressionPlanner:
                 tempo *= 1.0 + r * 0.15
             elif sec.role == "coda":
                 tempo *= 1.0 - r * 0.25
+            # Only a section long enough to establish a new pulse, and only a
+            # change big enough to hear and to play, earns a mark.
+            if sec.bars >= 8 and abs(tempo - prev_tempo) >= max(5.0, prev_tempo * 0.07):
+                out.append(TempoMark(first_bar + 1, round(tempo),
+                                     text=self._section_word(sec, tempo)))
+                prev_tempo = tempo
 
-            if sec.bars >= 4 and first_bar > 0:
-                word = self._section_word(sec, tempo)
-                out.append(TempoMark(first_bar + 1, round(tempo, 1), text=word))
-            elif first_bar == 0:
-                out[0] = TempoMark(1, round(tempo, 1))
-
-            # Ease into the cadence, then restore.
-            if sec.bars >= 6 and r >= 0.08:
-                rit_bar = first_bar + sec.bars - 2
-                out.append(TempoMark(rit_bar + 1, round(tempo * (1 - r * 0.9), 1),
-                                     text=self.rng.choice(RIT_WORDS)))
-                if sec is not sections[-1]:
-                    out.append(TempoMark(first_bar + sec.bars + 1,
-                                         round(tempo, 1), text="a tempo"))
-
-            # Press toward the high point of an intense section.
-            if sec.energy > 0.7 and sec.bars >= 8 and r >= 0.1:
-                out.append(TempoMark(first_bar + max(2, sec.bars // 3) + 1,
-                                     round(tempo * (1 + r * 0.5), 1),
+        # One easing into the close. Longer pieces may also breathe once at
+        # their single most intense moment, never section by section.
+        if sections and r >= 0.08 and total_bars >= 24:
+            peak = max(sections, key=lambda s: s.energy)
+            if peak.energy > 0.72 and peak is not sections[-1]:
+                pk_bar = bar_offsets[sections.index(peak)] + max(2, peak.bars // 3)
+                out.append(TempoMark(pk_bar + 1, round(prev_tempo * (1 + r * 0.4)),
                                      text=self.rng.choice(ACCEL_WORDS)))
-
-        # Every piece slows into its last bars.
-        if sections and r >= 0.06:
-            last_start = bar_offsets[-1]
-            total = last_start + sections[-1].bars
-            out.append(TempoMark(max(1, total - 1),
-                                 round(self.base_tempo * (1 - r * 1.6), 1),
+                out.append(TempoMark(pk_bar + max(3, peak.bars // 3) + 1,
+                                     round(prev_tempo), text="a tempo"))
+        if sections and r >= 0.06 and total_bars >= 6:
+            out.append(TempoMark(max(1, total_bars - 1),
+                                 round(prev_tempo * (1 - r * 1.6)),
                                  text="rall." if r > 0.12 else "poco rit."))
-        out.sort(key=lambda t: t.measure)
-        deduped: list[TempoMark] = []
-        for t in out:
-            if deduped and deduped[-1].measure == t.measure:
-                deduped[-1] = t
-            else:
-                deduped.append(t)
-        return deduped
+        return _thin_tempo_marks(out, min_gap=4)
 
     def _section_word(self, sec: SectionPlan, tempo: float) -> str:
         if tempo > self.base_tempo * 1.06:

@@ -123,6 +123,39 @@ def test_every_ensemble_composes(ensemble):
                             f"{ip.name} was written a {len(n.pitches)}-note chord"
 
 
+@pytest.mark.parametrize("style_id", ["chopin", "rachmaninoff", "mozart", "bach",
+                                      "debussy", "liszt", "beethoven"])
+def test_keyboard_writing_stays_inside_one_hand(style_id):
+    """No chord wider than the hand that has to play it.
+
+    Voicings are built to fill a register, which is right for an orchestra
+    and wrong for a keyboard, where one hand takes the whole chord. Left
+    unchecked this writes four-note chords spanning two octaves — notes on a
+    page that no pianist can play.
+    """
+    style = resolve_style(style_id)
+    key = Key("C", "minor")
+    sections = build_sections("ternary", key, style, random.Random(9), 24)
+    plan = CompositionPlan(style=style_id, key=str(key), time=(4, 4), tempo=96,
+                           form="ternary", sections=sections, seed=9,
+                           instruments=build_instruments("solo_piano"),
+                           ensemble="solo_piano")
+    score = compose(plan)
+    reach = max(9, min(14, style.hand_span))
+    for part in score.parts:
+        for m in part.measures:
+            for notes in m.voices.values():
+                for n in notes:
+                    if len(n.pitches) < 2:
+                        continue
+                    span = max(p.midi for p in n.pitches) - min(p.midi for p in n.pitches)
+                    assert span <= reach, (
+                        f"{style_id} bar {m.number}: {len(n.pitches)}-note chord "
+                        f"spanning {span} semitones, hand reaches {reach}")
+                    assert len(n.pitches) <= 4, (
+                        f"{style_id} bar {m.number}: {len(n.pitches)} notes in one hand")
+
+
 @pytest.mark.parametrize("texture", sorted(TEXTURES))
 def test_textures_fill_their_timeline_and_stay_playable(texture):
     key = Key("Eb", "minor")

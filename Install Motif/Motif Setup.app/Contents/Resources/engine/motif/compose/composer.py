@@ -8,7 +8,7 @@ from ..engrave.beaming import apply_beams
 from ..engrave.layout import fill_empty_measures, merge_tied_rests, place_direction, place_voice
 from ..plan import CompositionPlan, InstrumentPlan, SectionPlan
 from ..score import (DIVISIONS, Direction, EIGHTH, HALF, Note, Part, QUARTER, Score,
-                     SIXTEENTH, TempoMark, bar_duration, beat_duration)
+                     SIXTEENTH, bar_duration, beat_duration)
 from ..theory.harmony import Chord, roman_to_chord
 from ..theory.pitch import Key, Pitch
 from .harmony_timeline import HarmonyTimeline
@@ -53,6 +53,7 @@ class Composer:
         self.expression = ExpressionPlanner(self.rng, self.style, float(plan.tempo))
         self._section_starts: list[int] = []
         self._phrases: list[Phrase] = []
+        self._decorated: list[int] = []    # ticks already carrying a decoration
 
     def _report(self, text: str) -> None:
         if self._progress is not None:
@@ -70,7 +71,11 @@ class Composer:
         score.metadata.update({"prompt": p.prompt, "style": self.style.name,
                                "form": p.form, "seed": p.seed,
                                "character": p.character, "ensemble": p.ensemble})
-        instruments = p.instruments or [InstrumentPlan()]
+        # Resolved once and kept: the range and playability passes below need
+        # exactly the same list the parts were built from, and reading
+        # ``plan.instruments`` again would hand them an empty one whenever the
+        # default applied — silently skipping every check they exist to make.
+        instruments = self._instruments = p.instruments or [InstrumentPlan()]
         parts = [self._make_part(i, ip) for i, ip in enumerate(instruments)]
         for part in parts:
             score.add_part(part)
@@ -272,22 +277,37 @@ class Composer:
                     n.articulations.append("accent" if sec.energy > 0.6 else "tenuto")
                 elif n.duration <= EIGHTH and self.rng.random() < 0.5:
                     n.articulations.append("staccato")
-            if st.ornaments and self.rng.random() < st.ornament_rate and n.duration >= QUARTER:
+            # Decoration needs air around it. Drawn independently per note,
+            # trills and grace notes land on top of each other and the page
+            # turns into ornament soup; a player reads one gesture, not three
+            # in a row. Two beats' clearance keeps each one an event.
+            if (st.ornaments and n.duration >= QUARTER
+                    and self.rng.random() < st.ornament_rate
+                    and self._decoration_fits(tick, beat_ticks)):
                 n.ornaments.append(self.rng.choice(list(st.ornaments)))
+                self._decorated.append(tick)
             if is_last and sec.role in ("coda",):
                 n.fermata = True
         if slur_open and notes:
             notes[-1].slur_stop = self._slur_id
-        self._add_grace_notes(notes, key)
+        self._add_grace_notes(notes, rhythm, key, beat_ticks)
 
-    def _add_grace_notes(self, notes: list[Note], key: Key) -> None:
+    def _decoration_fits(self, tick: int, beat_ticks: int) -> bool:
+        gap = beat_ticks * 2
+        return all(abs(tick - d) >= gap for d in self._decorated)
+
+    def _add_grace_notes(self, notes: list[Note], rhythm: list, key: Key,
+                         beat_ticks: int) -> None:
         rate = self.style.grace_rate
         if rate <= 0:
             return
         out: list[Note] = []
-        for n in notes:
+        for i, n in enumerate(notes):
+            tick = rhythm[i][0] if i < len(rhythm) else 0
             if (n.pitches and n.duration >= QUARTER and n.tuplet is None
-                    and self.rng.random() < rate):
+                    and self.rng.random() < rate
+                    and self._decoration_fits(tick, beat_ticks)):
+                self._decorated.append(tick)
                 p = n.pitches[0]
                 up = self.rng.random() < 0.55
                 g = p.transpose_diatonic(1 if up else -1, key)
@@ -325,15 +345,14 @@ class Composer:
             m.key = key
         if changed_time:
             m.time = tuple(sec.time)
-        if index > 0:
+        # Rehearsal letters are how players find each other again in a
+        # rehearsal: they belong in ensemble music. Boxed letters over a solo
+        # nocturne are an analysis of the piece printed onto it.
+        if index > 0 and ensemble and sec.bars >= 8:
             m.directions.append(Direction("rehearsal", sec.label, 0, 1, "above"))
         if sec.text:
             m.directions.append(Direction("words", sec.text, 0, 1, "above",
                                           extra={"style": "italic"}))
-        if sec.tempo_scale != 1.0:
-            score.tempos.append(TempoMark(m_index, self.plan.tempo * sec.tempo_scale,
-                                          text="poco rit." if sec.tempo_scale < 1
-                                          else "poco accel."))
         self._write_dynamics(parts, sec, start_tick, bar_ticks)
         if self.style.pedal != "none" and is_solo_piano:
             self._write_pedal(main, timeline, start_tick, bar_ticks)
@@ -419,15 +438,33 @@ class Composer:
 
     def _chordal_right_hand(self, melody: list[Note], key: Key,
                             timeline: HarmonyTimeline, sec: SectionPlan) -> list[Note]:
-        """Melody harmonised underneath — the big Rachmaninoff right hand."""
+        """Melody harmonised underneath — the big Rachmaninoff right hand.
+
+        Only notes long enough to hold get the full chord. Harmonising every
+        note of a running line turns passagework into a wall of block chords
+        that no hand can play and no composer ever wrote: the melody
+        disappears inside it. Quick notes stay single and the line stays a
+        line.
+        """
         out: list[Note] = []
         t = timeline.start
-        thickness = 2 if sec.energy < 0.7 else 3
+        full = 2 if sec.energy < 0.7 else 3
         for n in melody:
             if n.grace or not n.pitches:
                 out.append(n)
                 if not n.grace:
                     t += n.duration
+                continue
+            strength = metric_strength(t, self.bar_ticks, self.beat_ticks)
+            if n.duration >= QUARTER:
+                thickness = full
+            elif n.duration >= EIGHTH and strength >= 2:
+                thickness = 1
+            else:
+                thickness = 0
+            if thickness == 0:
+                out.append(n)
+                t += n.duration
                 continue
             top = n.pitches[-1]
             chord = timeline.at(t)
@@ -496,26 +533,33 @@ class Composer:
         if mode == "none" or sec.energy < 0.55:
             return melody
         out: list[Note] = []
+        t = timeline.start
         for n in melody:
             if not n.pitches or n.grace:
                 out.append(n)
+                if not n.grace:
+                    t += n.duration
                 continue
             p = n.pitches[0]
             extra: Pitch | None = None
             if mode == "octave" and p.midi - 12 >= self.style.rh_range[0] - 6:
-                extra = p.transpose_chromatic(-12).respell(p.alter >= 0)
                 extra = key.spell(p.midi - 12)
             elif mode == "thirds":
                 extra = p.transpose_diatonic(-2, key)
             elif mode == "sixths":
                 extra = p.transpose_diatonic(-5, key)
-            elif mode == "chords":
-                chord = timeline.at(0)
-                extra = spell_in_chord(max(21, p.midi - 5), chord, key)
+            elif mode == "chords" and n.duration >= EIGHTH:
+                # The harmony under this note, not the harmony at tick zero —
+                # which for any section after the first is not even in this
+                # timeline, and silently resolved to its closing chord. Quick
+                # notes stay bare: filling in every sixteenth buries the tune
+                # under its own harmony.
+                extra = spell_in_chord(max(21, p.midi - 5), timeline.at(t), key)
             if extra is not None and extra.midi < p.midi:
                 n = n.copy()
                 n.pitches = [extra, p]
             out.append(n)
+            t += n.duration
         return out
 
     def _write_ensemble(self, score: Score, parts: list[Part], sec: SectionPlan,
@@ -577,6 +621,7 @@ class Composer:
     # ------------------------------------------------------------------
     def _finalise(self, score: Score, parts: list[Part], total_bars: int) -> None:
         self._clamp_ranges(parts)
+        self._make_playable(parts)
         for part in parts:
             vs = [(1, 1)] if part.staves == 1 else [(1, 1), (5, 2)]
             while len(part.measures) < total_bars:
@@ -586,8 +631,35 @@ class Composer:
             apply_beams(part, self.time)
             if part.measures:
                 part.measures[-1].barline = "light-heavy"
+                # A key signature printed on the final bar announces a key
+                # for music that never comes; readers show it as a courtesy
+                # signature hanging off the end of the last system.
+                part.measures[-1].key = None
         score.pad_to_equal_length()
 
+
+    def _make_playable(self, parts: list[Part]) -> None:
+        """No chord wider than the hand that has to play it.
+
+        Voicings are built to fill a register, which is right for an
+        orchestra — every note goes to a different player — and wrong for a
+        keyboard, where one hand has to take the whole chord. Without this a
+        left hand ends up holding a four-note chord spanning two octaves,
+        which simply cannot be played. The outer voices carry the harmony, so
+        inner notes are what give way.
+        """
+        for part, ip in zip(parts, self._instruments):
+            keyboard = part.staves > 1 or ip.midi_program in (0, 1, 2, 3, 6, 19, 20, 21)
+            if not keyboard:
+                continue
+            reach = max(9, min(14, self.style.hand_span))
+            for m in part.measures:
+                for notes in m.voices.values():
+                    for n in notes:
+                        if len(n.pitches) < 2:
+                            continue
+                        n.pitches = _fit_to_hand(
+                            n.pitches, reach, "bottom" if n.staff > 1 else "top")
 
     def _clamp_ranges(self, parts: list[Part]) -> None:
         """Last line of defence: no note outside the instrument's real range.
@@ -595,8 +667,7 @@ class Composer:
         Octave doubling and register shifts compound, so a nocturne can drift
         into a register no pianist would voice it in; fold such notes back.
         """
-        plans = self.plan.instruments or []
-        for part, ip in zip(parts, plans):
+        for part, ip in zip(parts, self._instruments):
             lo = max(21, ip.range_low or 21)
             hi = min(108, ip.range_high or 108)
             if lo >= hi:
@@ -620,6 +691,23 @@ class Composer:
                                 seen.add(p.midi)
                                 uniq.append(p)
                         n.pitches = uniq
+
+
+def _fit_to_hand(pitches: list[Pitch], reach: int, keep: str) -> list[Pitch]:
+    """Trim a chord until one hand can actually take it.
+
+    Only an outer note can narrow a chord, so notes come off the end that
+    matters least: the left hand keeps its bass, the right hand keeps the
+    melody on top. What is left is then thinned from the middle to four
+    notes, which is as many as one hand plays cleanly.
+    """
+    ordered = sorted(pitches, key=lambda p: p.midi)
+    drop = 0 if keep == "top" else -1
+    while len(ordered) > 1 and ordered[-1].midi - ordered[0].midi > reach:
+        del ordered[drop]
+    while len(ordered) > 4:
+        del ordered[len(ordered) // 2]
+    return ordered
 
 
 def _dyn_level(d: str) -> float:

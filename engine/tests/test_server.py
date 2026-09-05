@@ -40,6 +40,14 @@ def _post(base, path, payload):
         return json.loads(resp.read().decode("utf-8"))
 
 
+def _strip_notes(xml: str) -> str:
+    """Turn a score into the blank page MuseScore gives you on File > New."""
+    import re
+    # Notes carry attributes ("<note dynamics=...>"), so the tag has to be
+    # matched loosely or almost nothing is removed.
+    return re.sub(r"<note(?:\s[^>]*)?>.*?</note>", "", xml, flags=re.S)
+
+
 def _get(base, path):
     with urllib.request.urlopen(base + path, timeout=15) as resp:
         return json.loads(resp.read().decode("utf-8"))
@@ -84,6 +92,23 @@ class TestInPlaceEditing:
         assert res["same_file"] is False
         assert res["musicxml_path"] != str(own_path)
         assert own_path.read_text(encoding="utf-8") == first["musicxml"]
+
+    def test_a_new_piece_fills_the_blank_score_already_open(self, server, tmp_path):
+        # Starting a blank score and asking for a piece should put the piece
+        # on that page, not open a second tab next to it.
+        blank = _post(server, "/compose", {"prompt": "x"})   # any score, to get a shell
+        empty_xml = _strip_notes(blank["musicxml"])
+        own_path = tmp_path / "Blank.musicxml"
+        own_path.write_text(empty_xml, encoding="utf-8")
+
+        res = _post(server, "/compose", {
+            "prompt": "Compose a gentle piano piece",
+            "score_xml": empty_xml,
+            "score_path": str(own_path),
+        })
+        assert res["ok"] is True
+        assert res["same_file"] is True
+        assert res["musicxml_path"] == str(own_path)
 
     def test_a_nonexistent_score_path_is_never_trusted(self, server, tmp_path):
         first = _post(server, "/compose", {"prompt": "Compose a short piano piece"})

@@ -213,14 +213,17 @@ class MelodyWriter:
                         cur_motif = self._spin(base, motif_op)
                     spins += 1
                     realized = cur_motif.realize(self.key, anchor, self.scale_variant)
-                    # Loosely track the contour's register by folding a
-                    # whole octave when a statement has drifted far from
-                    # where the phrase should sit — the shape (every
-                    # interval) survives exactly; only its register moves,
-                    # the way a real line jumps octaves rather than snapping
-                    # note by note back onto a target.
+                    # Register correction moves the whole statement by an
+                    # octave, keeping its shape exactly. It has to stay rare:
+                    # a singer or a pianist leaps an octave to reposition a
+                    # line once in a while, at the start of a phrase — not
+                    # every couple of bars, which is just a line sawing up
+                    # and down. So it waits for a bar line, and for real
+                    # drift rather than a few notes of wandering.
                     target = targets.get(tick) or self._nearest_target(targets, tick)
-                    if target is not None and abs(realized[0].midi - target.midi) > 8:
+                    at_bar = tick % bar_ticks == 0
+                    if (target is not None and at_bar
+                            and abs(realized[0].midi - target.midi) > 14):
                         shift = -12 if realized[0].midi > target.midi else 12
                         realized = [self.key.spell(p.midi + shift) for p in realized]
                     pitch = realized[0]
@@ -232,7 +235,7 @@ class MelodyWriter:
                 pitch = self._choose(prev, prev_interval, chord, strength, tick, dur,
                                      targets, timeline, peak_midi)
 
-            pitch = self._clamp(pitch)
+            pitch = self._clamp(self._limit_leap(pitch, prev))
             note = Note([pitch], dur, velocity=self._velocity(strength))
             if tup is not None:
                 note.tuplet = tup
@@ -363,6 +366,25 @@ class MelodyWriter:
             if m % 12 in set(chord.pcs) and self.style.range_low <= m <= self.style.range_high:
                 return self.key.spell(m)
         return pitch
+
+    def _limit_leap(self, p: Pitch, prev: Pitch | None) -> Pitch:
+        """Keep a melody singable: fold a wild jump back toward the last note.
+
+        A transformed motif can ask for an interval no line would actually
+        take — a tenth, a twelfth, two octaves — especially once inversions
+        and expansions have compounded. Folding by octaves keeps the note's
+        identity (its place in the harmony) and only fixes where it sits.
+        """
+        if prev is None:
+            return p
+        limit = int(round(9 + 5 * self.style.leap_tolerance))
+        limit = max(7, min(16, limit))
+        midi = p.midi
+        while midi - prev.midi > limit and midi - 12 >= self.style.range_low:
+            midi -= 12
+        while prev.midi - midi > limit and midi + 12 <= self.style.range_high:
+            midi += 12
+        return p if midi == p.midi else self.key.spell(midi)
 
     def _clamp(self, p: Pitch) -> Pitch:
         m = p.midi

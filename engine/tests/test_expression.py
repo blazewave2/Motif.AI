@@ -34,9 +34,26 @@ class TestTempo:
     def test_freely_played_styles_breathe(self, style_id):
         ep = ExpressionPlanner(random.Random(3), resolve_style(style_id), 88.0)
         marks = ep.tempo_marks(SECTIONS, [0, 8, 16, 24], WHOLE)
-        assert len(marks) >= 5, "a Romantic piece should not run at one tempo"
+        assert len(marks) >= 2, "a Romantic piece should not run at one flat tempo"
         assert any(m.text for m in marks), "tempo changes need words on the page"
-        assert len({m.bpm for m in marks}) > 2
+
+    @pytest.mark.parametrize("style_id", ["chopin", "rachmaninoff", "liszt", "brahms"])
+    def test_the_page_is_never_littered_with_tempo_marks(self, style_id):
+        """A tempo mark is a structural event, not phrase decoration.
+
+        Marks every few bars — and changes of two or three beats a minute
+        that no player can act on — are what make an engraved page read as
+        machine output rather than music.
+        """
+        ep = ExpressionPlanner(random.Random(3), resolve_style(style_id), 88.0)
+        marks = ep.tempo_marks(SECTIONS, [0, 8, 16, 24], WHOLE)
+        assert len(marks) <= 5, f"{len(marks)} tempo marks in 28 bars is clutter"
+        bars = [m.measure for m in marks]
+        gaps = [b - a for a, b in zip(bars, bars[1:])]
+        assert all(g >= 4 for g in gaps), f"tempo marks crowded together: {bars}"
+        speeds = [round(m.bpm) for m in marks]
+        assert all(a != b for a, b in zip(speeds, speeds[1:])), \
+            f"a tempo mark that changes nothing: {speeds}"
 
     def test_baroque_holds_its_pulse(self):
         ep = ExpressionPlanner(random.Random(3), resolve_style("bach"), 96.0)

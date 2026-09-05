@@ -240,7 +240,11 @@ class Handler(BaseHTTPRequestHandler):
             # A "create" is a genuinely new, unrelated piece even when a
             # score happens to be open, so it always gets its own file.
             existing_path = body.get("score_path") or ""
-            in_place = (result.intent in ("continue", "develop", "harmonize", "edit")
+            # A blank score the musician just opened is where they are
+            # working: a new piece belongs on that empty page, not in a
+            # second tab beside it.
+            edits_open_piece = result.intent in ("continue", "develop", "harmonize", "edit")
+            in_place = ((edits_open_piece or result.open_score_empty)
                        and existing_path and Path(existing_path).is_file())
             if in_place:
                 xml_path = Path(existing_path)
