@@ -74,7 +74,12 @@ class MotifState:
         self.agent = MotifAgent(model=self.model, planner=self.planner)
 
     def _load_model(self) -> None:
-        path = self.cfg.get("model_path") or os.environ.get("MOTIF_MODEL", "")
+        # A checkpoint dropped into the Motif folder is picked up with no
+        # configuration at all: download it, put it there, restart. That is
+        # the whole install step for the trained composer.
+        default = CONFIG_DIR / "model.pt"
+        path = (self.cfg.get("model_path") or os.environ.get("MOTIF_MODEL", "")
+                or (str(default) if default.exists() else ""))
         if not path:
             return
         if not Path(path).exists():

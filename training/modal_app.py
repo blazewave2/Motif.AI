@@ -2,11 +2,15 @@
 
 Run it with:
 
+    modal run training/modal_app.py --step all --budget 26      # the whole thing
+    modal run training/modal_app.py --step download            # fetch the result
+
+or one stage at a time:
+
     modal run training/modal_app.py --step corpus     # download the scores  (CPU)
     modal run training/modal_app.py --step prepare    # tokenize + augment   (CPU)
-    modal run training/modal_app.py --step train --budget 22
+    modal run training/modal_app.py --step train --budget 26
     modal run training/modal_app.py --step sample
-    modal run training/modal_app.py --step download   # pull the checkpoint down
 
 The budget is enforced in the training loop itself, not just documented: the
 run checkpoints and stops before the estimated spend crosses the cap, so an
@@ -108,7 +112,7 @@ PRESETS = {
 
 @app.function(volumes={str(DATA): volume}, gpu=DEFAULT_GPU,
               timeout=24 * 60 * 60, memory=32768)
-def train(budget_usd: float = 22.0, preset: str = "small", gpu: str = DEFAULT_GPU,
+def train(budget_usd: float = 26.0, preset: str = "small", gpu: str = DEFAULT_GPU,
           gpu_hourly: float | None = None, max_steps: int = 60000,
           batch_size: int = 16, grad_accum: int = 4, lr: float = 6e-4,
           warmup: int = 400, eval_every: int = 500, resume: bool = True,
@@ -336,12 +340,30 @@ def status() -> dict:
 
 # ---------------------------------------------------------------------------
 @app.local_entrypoint()
-def main(step: str = "status", budget: float = 22.0, preset: str = "small",
+def main(step: str = "status", budget: float = 26.0, preset: str = "small",
          gpu: str = DEFAULT_GPU, gpu_hourly: float = 0.0, max_steps: int = 60000,
          transpositions: int = 12, limit: int = 0, style: str = "chopin",
          key: str = "Eb minor", bars: int = 16, out: str = "checkpoints",
          include_nc: bool = False, core_only: bool = False):
-    if step == "corpus":
+    if step == "all":
+        # The whole pipeline in order, which is what a first run wants.
+        # Each stage is idempotent, so re-running after an interruption
+        # resumes rather than starting again.
+        print("1/4  downloading public-domain scores…", flush=True)
+        print(fetch_corpus.remote(include_extended=not core_only,
+                                  include_nc=include_nc))
+        print("\n2/4  tokenising and augmenting…", flush=True)
+        meta = prepare_data.remote(transpositions=transpositions,
+                                   limit=limit or None)
+        print(json.dumps({k: v for k, v in meta.items() if k != "tokens"}, indent=2))
+        print(f"\n3/4  training on {gpu} within ${budget:.2f}…", flush=True)
+        print(train.remote(budget_usd=budget, preset=preset, gpu=gpu,
+                           gpu_hourly=gpu_hourly or None, max_steps=max_steps))
+        print("\n4/4  sampling from the trained model…", flush=True)
+        print(sample.remote(preset=preset, style=style, key=key, bars=bars))
+        print("\nNow bring the checkpoint down:")
+        print(f"  modal run training/modal_app.py --step download --preset {preset}")
+    elif step == "corpus":
         print(fetch_corpus.remote(include_extended=not core_only,
                                   include_nc=include_nc))
     elif step == "prepare":

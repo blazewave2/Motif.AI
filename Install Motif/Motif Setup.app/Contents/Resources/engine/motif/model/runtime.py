@@ -21,6 +21,10 @@ class ModelUnavailable(RuntimeError):
     pass
 
 
+def _count(ids: list[int], token_id: int) -> int:
+    return sum(1 for i in ids if i == token_id)
+
+
 class NeuralComposer:
     """Loads a checkpoint and samples grammar-constrained token sequences."""
 
@@ -91,6 +95,59 @@ class NeuralComposer:
             allowed_fn=lambda ids: grammar.mask(ids, torch),
             eos_id=VOCAB.eos_id)
         tokens = VOCAB.decode(out[0].tolist())
+        score = decode_tokens(tokens, key=key, time=time)
+        score.tempo = tempo
+        score.metadata["generator"] = "neural"
+        return score
+
+    def generate_long(self, *, style: str = "chopin", key: Key | None = None,
+                      time: tuple[int, int] = (4, 4), tempo: float = 96.0,
+                      bars: int = 32, temperature: float = 0.95,
+                      top_k: int = 40, top_p: float | None = None,
+                      seed: int | None = None, progress=None) -> Score:
+        """Compose a whole piece, past the model's context window.
+
+        A bar costs roughly two hundred tokens, so even a 1024-token context
+        only holds a handful of them — far short of a real piece. This keeps
+        generating in windows, each one continuing from the tail of what came
+        before, so the music carries on from itself rather than restarting.
+        The conditioning stays pinned to the front of every window so style
+        and key never drift away mid-piece.
+        """
+        torch = self.torch
+        if seed is not None:
+            torch.manual_seed(seed)
+        key = key or Key("C", "major")
+        cond = Conditioning(style=style, key=key, time=time, tempo=tempo)
+        prefix = VOCAB.encode(cond.tokens())
+        bar_id = VOCAB.stoi["BAR"]
+
+        produced: list[int] = list(prefix)
+        # Leave room for the prefix and a working window of new tokens.
+        window = max(64, self.config.block_size - len(prefix) - 8)
+        guard = 0
+        while _count(produced, bar_id) <= bars and guard < bars * 4 + 16:
+            guard += 1
+            done = max(0, _count(produced, bar_id) - 1)
+            if progress is not None and done:
+                progress(f"Composing bar {min(done, bars)} of {bars}…")
+            tail = produced[len(prefix):][-(window // 2):]
+            ctx = prefix + tail
+            idx = torch.tensor([ctx], dtype=torch.long, device=self.device)
+            grammar = _Grammar(target_bars=bars + 1 - done)
+            out = self.model.generate(
+                idx, max_new_tokens=min(window, 512), temperature=temperature,
+                top_k=top_k, top_p=top_p,
+                allowed_fn=lambda ids: grammar.mask(ids, torch),
+                eos_id=VOCAB.eos_id)
+            fresh = out[0].tolist()[len(ctx):]
+            if not fresh:
+                break
+            produced.extend(fresh)
+            if VOCAB.eos_id in fresh and _count(produced, bar_id) > bars:
+                break
+
+        tokens = VOCAB.decode(produced)
         score = decode_tokens(tokens, key=key, time=time)
         score.tempo = tempo
         score.metadata["generator"] = "neural"

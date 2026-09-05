@@ -20,13 +20,18 @@ MuseScore {
     title: "Motif.AI"
     description: "Your AI composing partner — describe a piece and Motif writes it."
     version: "1.0.0"
-    pluginType: "dock"
+    // MuseScore 4 dropped dockable plugin panels in its UI rewrite:
+    // pluginType "dock" silently never opens there, which is why this has to
+    // be a window. dockArea is kept for MuseScore 3, which still honours it
+    // and puts the panel on the right.
+    pluginType: "dialog"
     dockArea: "right"
     requiresScore: false
     thumbnailName: "assets/thumbnail.png"
 
-    implicitWidth: 340
-    implicitHeight: 900
+    // Tall and narrow, so it sits beside the score rather than over it.
+    implicitWidth: 380
+    implicitHeight: 820
     width: implicitWidth
     height: implicitHeight
 

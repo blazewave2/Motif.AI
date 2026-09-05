@@ -65,10 +65,31 @@ mazurka, ballade, prelude, étude, intermezzo, concerto and more.
 **13 ensembles** — solo piano through full orchestra, string quartet, piano
 trio, concerto, duo sonatas, organ, harpsichord, guitar.
 
+## The trained composer
+
+Motif has two brains, and the second one is optional.
+
+The **symbolic engine** knows music theory — spelled pitch, functional
+harmony, voice leading, per-composer idiom libraries. It always works, needs
+nothing installed, and never writes an unplayable bar. But it knows the
+rules without having any taste.
+
+The **trained model** is a transformer taught on real public-domain scores.
+It has heard how those rules are actually used, which is the part no amount
+of rule-writing supplies. When a checkpoint is present the model writes the
+notes and the engine does what a model is bad at and an engraver must be
+right about: keeping every bar full, every chord inside one hand, every note
+inside the instrument, and the page properly beamed and marked.
+
+Training it costs about $26 of GPU time on Modal and takes an afternoon —
+see **[docs/TRAINING.md](docs/TRAINING.md)**. Drop the result into your
+Motif folder as `model.pt` and it becomes the composer. Without it, the
+symbolic engine carries on exactly as before.
+
 ## Why it sounds played rather than printed
 
-Motif is not a language model guessing at note names. It is a music-theory
-system — spelled pitch, functional harmony, voice leading, per-composer idiom
+The performance layer applies to both brains. It is a music-theory system —
+spelled pitch, functional harmony, voice leading, per-composer idiom
 libraries — with a performance layer on top of it.
 
 That performance layer is what makes the difference:

@@ -718,4 +718,16 @@ def _dyn_level(d: str) -> float:
 
 
 def compose(plan: CompositionPlan, model=None, progress=None) -> Score:
+    """Write the piece — with the trained model when there is one.
+
+    A checkpoint that is missing, half-trained, or built against a different
+    vocabulary must never stop Motif composing, so any failure at all falls
+    back to the symbolic engine rather than surfacing to the musician.
+    """
+    if model is not None and getattr(model, "available", False):
+        try:
+            from .neural import compose_neural
+            return compose_neural(plan, model, progress)
+        except Exception:
+            pass
     return Composer(plan, model, progress).render()
