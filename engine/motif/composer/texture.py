@@ -56,6 +56,7 @@ class TextureContext:
     prev_voicing: list[int] = field(default_factory=list)
     prev_bass: int | None = None
     tempo: float = 90.0            # beats per minute, so figuration suits the speed
+    melody: list = field(default_factory=list)   # the phrase's tune, for textures that imitate it
 
 
 def bass_note(h: Harmony, ctx: TextureContext, octave_down: bool = False) -> int:
@@ -439,9 +440,34 @@ REALISERS = {
 }
 
 
+def imitation(harmonies: list[Harmony], start: F, end: F, ctx: TextureContext) -> list[TexNote]:
+    """Two-part invention: the right hand states the subject alone, the left
+    hand answers it an octave or two lower a bar later, and then walks on in
+    counterpoint."""
+    bar = ctx.bar_len
+    out: list[TexNote] = []
+    subject = [n for n in ctx.melody if start <= n.onset < start + bar]
+    if not subject or end - start < 3 * bar:
+        return realise("walking", harmonies, start, end, ctx)
+    top = max(n.midi for n in subject)
+    drop = 12
+    while top - drop > 60:
+        drop += 12
+    for n in subject:
+        on = n.onset + bar
+        if on >= end:
+            break
+        out.append(TexNote(on, min(n.dur, end - on), [n.midi - drop]))
+    ctx.prev_bass = subject[-1].midi - drop
+    out += realise("walking", harmonies, start + 2 * bar, end, ctx)
+    return out
+
+
 def realise(kind: str, harmonies: list[Harmony], start: F, end: F, ctx: TextureContext
             ) -> list[TexNote]:
     """Lay out every chord between ``start`` and ``end`` in texture ``kind``."""
+    if kind == "imitation":
+        return imitation(harmonies, start, end, ctx)
     out: list[TexNote] = []
     for i, h in enumerate(harmonies):
         a, b = max(h.onset, start), min(h.end, end)

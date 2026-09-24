@@ -59,6 +59,7 @@ class CompositionPlan:
     tempo_text: str = ""
     tempo_given: bool = False            # the request named a tempo
     time_given: bool = False             # the request named a metre
+    length_bars: int = 0                 # the length the request asked for, if it did
     form: str = "ternary"
     sections: list[SectionPlan] = field(default_factory=list)
     instruments: list[InstrumentPlan] = field(default_factory=list)

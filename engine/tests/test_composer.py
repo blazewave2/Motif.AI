@@ -198,3 +198,35 @@ def test_a_sentence_answers_its_idea_and_a_consequent_borrows_the_opening():
     assert [h.roman for h in cons[:len(first4)]][:2] == [h.roman for h in first4][:2]
     assert cons[-1].roman.startswith("i")
     assert sum(h.dur for h in cons) == 32
+
+
+def test_the_learned_melody_model_ships_and_is_used():
+    from motif.composer.style_model import melody_model
+    model = melody_model()
+    assert model is not None and model.songs > 1000
+    # after a rising leap a melody usually falls back by step
+    assert model.interval_cost(7, -2) < model.interval_cost(7, 5)
+    # the leading tone rises to the tonic
+    assert model.degree_cost(False, 11, 0) < model.degree_cost(False, 11, 6)
+
+
+def test_returns_can_be_ornamented_with_runs_that_are_written_as_tuplets():
+    c, _ = _compose("A tender Chopin nocturne in E flat major", seed=2, quality="balanced")
+    assert _errors(c.msn) == []
+    assert "{6 " in c.msn or "{3 " in c.msn or "{a" in c.msn or "turn" in c.msn
+
+
+def test_every_chord_in_every_style_is_spelled_sensibly():
+    from motif.composer.harmony import HARMONY_STYLES, chord_for
+    for style in HARMONY_STYLES.values():
+        for mode, key in (("major", Key.parse("C major")), ("minor", Key.parse("C minor")),
+                          ("minor", Key.parse("A minor"))):
+            pools = [style.tonic[mode], style.predominant[mode], style.dominant[mode],
+                     style.response.get(mode, [])]
+            pools += [c[mode] for c in style.cadence.values()]
+            for pool in pools:
+                for _w, pattern in pool:
+                    for label in pattern:
+                        chord = chord_for(label, key)
+                        for p in chord.pitches(4, key):
+                            assert abs(p.alter) <= 1, (style.name, mode, label, str(p))

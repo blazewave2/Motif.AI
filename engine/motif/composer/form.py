@@ -144,6 +144,7 @@ def choose_metre(family: str, prof: Profile, rng: random.Random) -> tuple[int, i
 
 def _genre_family(genre: str) -> str:
     for fam, words in (
+        ("continuation", ("continuation",)),
         ("waltz", ("waltz", "valse", "ländler")),
         ("mazurka", ("mazurka", "polonaise")),
         ("sonata", ("sonata", "sonatina", "first movement")),
@@ -187,11 +188,12 @@ def _ternary(prof: Profile, key: Key, bars: int, rng: random.Random, character: 
     b_bars = _phrase_bars(bars * 0.3)
     r_bars = _phrase_bars(bars * 0.22)
     coda = 4 if bars >= 24 else 2
+    short = bars < 30          # no room for a passage leading back
     phrases: list[PhraseSpec] = []
     words = prof.words
     # A: a period (antecedent + consequent) or a sentence
     phrases += _theme_group("A", "theme", key, a_bars, prof, rng, tx, energy=0.45,
-                            words=words.get("theme", ""))
+                            words=words.get("theme", ""), short=bars <= 20)
     # B: contrasting key, more motion, building to the climax
 
     n_b = max(1, b_bars // 8) if b_bars >= 8 else 1
@@ -203,12 +205,15 @@ def _ternary(prof: Profile, key: Key, bars: int, rng: random.Random, character: 
                             _tex(prof, "contrast", rng, tx), new_section=(i == 0),
                             words=words.get("contrast", "") if i == 0 else ""))
     # retransition back to the tonic
-    phrases.append(_phr("B", "transition", "development", 4, key, "HC", 0.85,
-                        _tex(prof, "contrast", rng, tx)))
+    if not short:
+        phrases.append(_phr("B", "transition", "development", 4, key, "HC", 0.85,
+                            _tex(prof, "contrast", rng, tx)))
     # A': the theme returns — at its climax for Rachmaninoff and Liszt,
     # ornamented and tender for Chopin
     grand = prof.octave_climax
     theme_idx = [i for i, p in enumerate(phrases) if p.section == "A"]
+    if bars <= 20:
+        theme_idx = theme_idx[-1:]          # a short piece brings back only its close
     for j, src in enumerate(theme_idx[:max(1, r_bars // 8)]):
         p = phrases[src]
         last = j == max(1, r_bars // 8) - 1
@@ -226,10 +231,15 @@ def _ternary(prof: Profile, key: Key, bars: int, rng: random.Random, character: 
 
 
 def _theme_group(section: str, role: str, key: Key, bars: int, prof: Profile,
-                 rng: random.Random, tx: dict, energy: float, words: str = ""
-                 ) -> list[PhraseSpec]:
+                 rng: random.Random, tx: dict, energy: float, words: str = "",
+                 short: bool = False) -> list[PhraseSpec]:
     out: list[PhraseSpec] = []
     tex = _tex(prof, role, rng, tx)
+    if short and bars <= 8:
+        # a small period: four bars that ask, four that answer
+        return [_phr(section, role, "antecedent", 4, key, "HC", energy, tex, new_section=True,
+                     words=words),
+                _phr(section, role, "consequent", 4, key, "PAC", energy, tex)]
     if bars >= 16 and prof.phrase == "period":
         out.append(_phr(section, role, "antecedent", 8, key, "HC", energy, tex,
                         new_section=True, words=words))
@@ -345,11 +355,13 @@ def _invention(prof: Profile, key: Key, bars: int, rng: random.Random, character
     tx: dict = {}
     tex = _tex(prof, "theme", rng, tx)
     other = _related(key, "dominant" if not key.is_minor else "relative")
+    # the subject alone, then answered in the other hand an octave lower
+    lead = "imitation" if tex == "walking" else tex
     ph = [
-        _phr("A", "theme", "sentence", 8, key, "HC", 0.5, tex, new_section=True),
+        _phr("A", "theme", "sentence", 8, key, "HC", 0.5, lead, new_section=True),
         _phr("A", "development", "continuation", 8, other, "PAC", 0.6, tex),
         _phr("B", "development", "development", 8, _related(key, "submediant"), "PAC", 0.7, tex),
-        _phr("A'", "return", "sentence", 8, key, "PAC", 0.6, tex, recall=0),
+        _phr("A'", "return", "sentence", 8, key, "PAC", 0.6, lead, recall=0),
     ]
     return FormPlan("invention", ph)
 
@@ -365,7 +377,34 @@ def _etude(prof: Profile, key: Key, bars: int, rng: random.Random, character: st
     return plan
 
 
+def _continuation(prof: Profile, key: Key, bars: int, rng: random.Random, character: str
+                  ) -> FormPlan:
+    """Carrying on from a piece that is already written: its theme developed
+    away from home, a passage leading back, the theme restated and closed,
+    and a coda."""
+    tx: dict = {}
+    ph: list[PhraseSpec] = []
+    away = _related(key, "relative" if key.is_minor else rng.choice(["dominant", "submediant"]))
+    if bars >= 24:
+        ph.append(_phr("C", "development", "development", 8, away, "HC", 0.65,
+                       _tex(prof, "contrast", rng, tx), new_section=True))
+        ph.append(_phr("C", "transition", "development", 4, key, "HC", 0.8,
+                       _tex(prof, "contrast", rng, tx)))
+        ph.append(_phr("A", "return", "consequent", 8, key, "PAC", 0.6,
+                       _tex(prof, "return", rng, tx), new_section=True))
+        ph.append(_phr("coda", "closing", "closing", 4, key,
+                       "plagal" if prof.harmony in ("russian", "romantic") else "PAC", 0.3,
+                       _tex(prof, "closing", rng, tx), new_section=True))
+    else:
+        ph.append(_phr("C", "development", "continuation", 8, key, "HC", 0.6,
+                       _tex(prof, "contrast", rng, tx), new_section=True))
+        ph.append(_phr("coda", "closing", "closing", max(4, min(8, bars - 8)), key, "PAC", 0.35,
+                       _tex(prof, "closing", rng, tx)))
+    return FormPlan("continuation", ph)
+
+
 _TEMPLATES = {
+    "continuation": _continuation,
     "prelude": _ternary, "nocturne": _ternary, "waltz": _waltz, "mazurka": _mazurka,
     "sonata": _sonata, "minuet": _minuet, "invention": _invention, "etude": _etude,
 }

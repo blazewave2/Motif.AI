@@ -12,14 +12,19 @@ phrasing, pedalling, dynamics and rubato — and opens it in MuseScore.
 ---
 
 ```
-"Create a simple melody for me to play."
+"A Rachmaninoff prelude in C♯ minor."
 
-"Make a full Rachmaninoff style piano concerto using a dark E♭ minor melody."
+"A tender Chopin nocturne in E♭, with an agitated middle section."
+
+"A string quartet in D minor, in the style of Tchaikovsky."
 ```
 
-Both work. The first gives you sixteen playable bars almost instantly. The
-second gives you a 120-bar concerto for piano and orchestra, with solo and
-tutti trading, a cadenza and a coda.
+Each one comes back as a finished piece: a theme that is stated, answered
+and developed, a contrasting middle section, a return and a coda — harmonised
+in the composer's own idiom, laid out for the hands the way that composer
+wrote for the piano, and marked with dynamics, phrasing, pedalling and tempo.
+Motif composes it on your computer, with its own composer: no online service,
+no language model.
 
 ## Getting started
 
@@ -65,43 +70,32 @@ mazurka, ballade, prelude, étude, intermezzo, concerto and more.
 **13 ensembles** — solo piano through full orchestra, string quartet, piano
 trio, concerto, duo sonatas, organ, harpsichord, guitar.
 
-## The trained composer
+## The composer
 
-Motif has two brains, and the second one is optional.
-
-The **symbolic engine** knows music theory — spelled pitch, functional
-harmony, voice leading, per-composer idiom libraries. It always works, needs
-nothing installed, and never writes an unplayable bar. But it knows the
-rules without having any taste.
-
-The **trained model** is a transformer taught on real public-domain scores.
-It has heard how those rules are actually used, which is the part no amount
-of rule-writing supplies. When a checkpoint is present the model writes the
-notes and the engine does what a model is bad at and an engraver must be
-right about: keeping every bar full, every chord inside one hand, every note
-inside the instrument, and the page properly beamed and marked.
-
-Training it costs about $26 of GPU time on Modal and takes an afternoon —
-see **[docs/TRAINING.md](docs/TRAINING.md)**. Drop the result into your
-Motif folder as `model.pt` and it becomes the composer. Without it, the
-symbolic engine carries on exactly as before.
-
-## Why it sounds played rather than printed
-
-The performance layer applies to both brains. It is a music-theory system —
-spelled pitch, functional harmony, voice leading, per-composer idiom
-libraries — with a performance layer on top of it.
-
-That performance layer is what makes the difference:
+Motif composes the way a composer does, from the whole piece down to the
+note ([how it works](docs/COMPOSER.md)):
 
 | | |
 |---|---|
-| **The tempo breathes** | Phrases ease into their cadences and press through developments; the piece slows at its close. How freely depends on the composer — Bach holds his pulse, Chopin does not. |
-| **The volume moves** | Every note is shaped by where it sits in the phrase, how high it is, and where the beat falls — not stepped between eight printed marks. The melody is voiced above the accompaniment, as a pianist balances the hands. |
-| **The rhythm varies** | Accompaniments rest, hold, halve their motion, lean into a dotted lilt or turn over in triplets. Mazurkas lean on the second beat; Brahms writes hemiolas. |
-| **The harmony travels** | Sections modulate to real key relationships, coloured with applied dominants, borrowed chords and Neapolitans at rates drawn from each composer. |
-| **The melody is actually about something** | The whole line is spun continuously from one small cell — inverted, fragmented, sequenced, taken further — the way a real piece develops a theme, rather than a fresh, unrelated line generated bar by bar. |
-| **It engraves like a real page** | Eighth notes and shorter are beamed in proper metrical groups, not printed as isolated flagged notes. |
+| **A form, not a stream** | Every piece is laid out before a note is written: an opening, a theme group, a middle section in a related key with its own theme, a passage leading home, the return — at its climax, or ornamented — and a coda. Sonatas, waltzes, mazurkas, minuets and inventions have their own architectures. |
+| **Themes with a shape** | A theme starts as a two-bar idea chosen from many candidates for its character and for the harmony it implies. Phrases state it, answer it at another level, take it in sequence and break it into fragments on the way to the cadence — so the music is always about something. |
+| **Harmony in the composer's own language** | Chords are planned by function — tonic, answer, predominant, cadence — and drawn from each composer's vocabulary: Mozart's cadential six-fours and augmented sixths, Chopin's Neapolitans and applied diminished sevenths, Rachmaninoff's added-sixth minor chords, half-diminished supertonics, line clichés and pedal points, Debussy's planing. Where the tune needs it, the chords under it are recoloured. |
+| **Melody searched note by note** | Every note is chosen by a search that weighs chord tones and resolutions, leaps and their recovery, one planned climax per phrase, the idea's own contour, the cadence — and what real melodies do, learned from 1,469 public-domain scores. Several versions of every phrase are written and the best kept. |
+| **Written for the hands** | The accompaniment is laid out in the idiom of the passage — the nocturne left hand, Rachmaninoff's tolling bells, sweeping arpeggios, the waltz bass, the Alberti bass, a walking bass, a two-part invention — with every chord inside one hand's reach and under the melody. |
+| **Played, not printed** | Dynamics follow the energy of each phrase, hairpins swell into its high point, slurs follow its breathing, the pedal changes with the harmony; the music holds back before new sections, broadens into the climax, moves on in the middle (*Più mosso*) and returns (*Tempo I*); returns are ornamented; the last chord is held. |
+
+**25 composers** with profiles of their own — Bach, Handel, Scarlatti,
+Vivaldi, Mozart, Haydn, Clementi, Beethoven, Schubert, Mendelssohn, Chopin,
+Schumann, Liszt, Brahms, Grieg, Tchaikovsky, Rachmaninoff, Scriabin, Debussy,
+Ravel, Satie, Einaudi and film idioms — and any other composer by kinship
+(Medtner writes like Rachmaninoff, Field like Chopin).
+
+**Any ensemble** — solo piano; voice, violin or cello with piano; piano trio;
+string quartet; string orchestra; orchestra; organ; harpsichord; guitar.
+
+**Care.** The panel's *Care* setting chooses how many ideas the composer
+weighs at every step — from *Sketch* to *Maximum*. Quality always comes
+first: every setting goes through every stage.
 
 ## Privacy
 
@@ -113,8 +107,9 @@ find.
 
 ## For developers
 
-Architecture, the engine's design decisions and the optional trained model are
-documented in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** and
+The composer is described in **[docs/COMPOSER.md](docs/COMPOSER.md)**, the
+engine and plugin in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**, and how
+the melodic model is learned from public-domain scores in
 **[docs/TRAINING.md](docs/TRAINING.md)**. The engine has no required
 dependencies and its test suite runs with `pytest` from `engine/`.
 

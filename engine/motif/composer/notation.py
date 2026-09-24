@@ -175,6 +175,38 @@ def _smallest_step(s: F, left: F) -> F:
     return left
 
 
+def group_tuplets(notes: list[Note]) -> None:
+    """Consecutive notes of triplet values are written as triplets: a group
+    ends as soon as its values add up to a plain written length."""
+    notes.sort(key=lambda n: n.onset)
+    group: list[Note] = []
+    total = F(0)
+
+    def close(ok: bool) -> None:
+        six = ok and len(group) == 6 and all(g.dur == F(1, 6) for g in group)
+        for g in group:
+            g.tuplet = ((6, 4) if six else (3, 2)) if ok else None
+            g.tuplet_start = ok and g is group[0]
+            g.tuplet_stop = ok and g is group[-1]
+
+    for n in notes:
+        triple = n.dur.denominator % 3 == 0
+        if group and (not triple or n.onset != group[-1].end):
+            close(False)
+            group, total = [], F(0)
+        if not triple:
+            continue
+        group.append(n)
+        total += n.dur
+        sextuplet = all(g.dur == F(1, 6) for g in group)
+        if total.denominator & (total.denominator - 1) == 0 and \
+                not (sextuplet and total < 1):              # a power of two: complete
+            close(True)
+            group, total = [], F(0)
+    if group:
+        close(False)
+
+
 # ---------------------------------------------------------------------------
 # writing a piece
 # ---------------------------------------------------------------------------
@@ -232,6 +264,9 @@ class Sheet:
         lines.append("")
 
         starts = self.bar_starts()
+        for v in self.voices:
+            if any(x.dur.denominator % 3 == 0 and x.tuplet is None for x in v.notes):
+                group_tuplets(v.notes)
         by_voice = {v.label: _Cursor(v) for v in self.voices}
         pickup_bar = self.pickup > 0
         for b in range(1, self.bars + 1):

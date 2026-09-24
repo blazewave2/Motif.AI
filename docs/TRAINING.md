@@ -1,107 +1,69 @@
-# Training the composer
+# Teaching the composer from real scores
 
-Motif ships with a symbolic engine that knows music theory. It knows the
-rules; it does not have taste. A model trained on real scores has heard how
-those rules are actually used, which is the part no amount of rule-writing
-supplies.
+Motif's composer (see [COMPOSER.md](COMPOSER.md)) writes by musical rules —
+harmony, voice leading, phrase structure, the idioms of each composer — and
+by what it has learned from real music: how melodies actually move. That
+learned part is a small statistical model, shipped with Motif as
+`engine/motif/composer/data/melody.json` (about 8 KB). The composer reads it
+at start-up; nothing else is needed at run time.
 
-This is how you train it. It costs about $26 of GPU time and takes a few
-hours, most of which is unattended.
+## What it learns
 
-## What you need
+For every score it reads, `training/learn_style.py` takes the tune (the
+first part with a single staff — the voice of a song, the first violin of a
+quartet), splits it into phrases at rests, finds its key, and counts:
 
-* A [Modal](https://modal.com) account. New accounts include a monthly
-  credit that covers this run.
-* Python on your own machine, only to launch the job — the work happens on
-  Modal's GPUs, not yours.
+* which interval follows which (in semitones, up to an octave either way),
+  and which interval a phrase starts with;
+* which scale degree follows which, separately in major and in minor;
+* which scale degrees fall on beats;
+* which note value follows which.
 
-```
-pip install modal
-modal setup            # opens a browser once to link your account
-```
+A singer repeats a note for each syllable of the words where an instrument
+would simply hold it, so repeated notes in songs are merged before counting.
+The counts are smoothed into log-probabilities. In the melody search each is
+turned into a cost relative to the most likely choice in its context — the
+most usual continuation costs nothing — and weighed against the composer's
+own rules.
 
-## Run it
+## Rebuilding it
 
-From the project folder:
-
-```
-modal run training/modal_app.py --step all --budget 26
-```
-
-That does four things in order, and each one can be re-run safely if you
-lose your connection — they resume rather than restart:
-
-1. **Downloads the scores.** Public-domain Humdrum and MusicXML editions:
-   Bach chorales, Beethoven and Mozart sonatas, Scarlatti, Haydn, Chopin,
-   Joplin, and the CC0 OpenScore collections. Nothing is scraped from a
-   commercial catalogue.
-2. **Tokenises them.** Every piece becomes a token stream, then is
-   transposed into all twelve keys — which is exact, and turns a modest
-   corpus into something a model can actually learn from.
-3. **Trains.** The budget is enforced inside the training loop, not just
-   written down: it checkpoints and stops before the spend crosses the cap,
-   so an overnight job cannot quietly run past it. Progress prints as it
-   goes.
-4. **Samples**, so you can see what it learned before you download it.
-
-Then bring the checkpoint down:
+You need a folder of MusicXML files whose names start with the collection
+they came from (`lieder__…`, `quartets__…`). Then, from the project folder:
 
 ```
-modal run training/modal_app.py --step download
+python training/learn_style.py path/to/musicxml
 ```
 
-## Install it
+It reads every file (about three minutes for 1,500 scores on a laptop) and
+writes `engine/motif/composer/data/melody.json`. `--only` chooses which
+collections are learned from; `--out` writes somewhere else.
 
-Put the downloaded `motif-small.pt` into the Motif folder in your home
-directory, renamed to `model.pt`:
+## Which scores may be used
 
-* macOS / Linux — `~/.motif/model.pt`
-* Windows — `C:\Users\<you>\.motif\model.pt`
+Only scores whose licence allows any use, including commercial use, go into
+the shipped model:
 
-Restart Motif (or restart your computer). That is the whole install step:
-the engine picks the file up on startup, and from then on the model writes
-the notes while the engine keeps every bar full, every chord inside one
-hand, and the page properly engraved.
-
-To confirm it is being used, the panel's Preferences shows the engine as
-`symbolic+neural`, and generated scores are tagged `neural`.
-
-## Tuning the run
-
-| Flag | Default | Notes |
+| Collection | Licence | Used |
 |---|---|---|
-| `--budget` | `26` | Dollars of GPU time. Hard-enforced. |
-| `--preset` | `small` | `small` is 25M parameters, sized to this corpus. `base` (90M) is worth it only with a larger corpus folded in. |
-| `--gpu` | `A10G` | `L40S` or `A100-40GB` cost more per hour but often more work per dollar. |
-| `--transpositions` | `12` | Fewer means less data but a faster prepare step. |
-| `--core-only` | off | Skips the large optional collections if bandwidth is short. |
+| OpenScore Lieder (≈1,350 songs) | CC0 | yes |
+| OpenScore String Quartets | CC0 | yes |
+| DCML annotated corpora (Mozart, Beethoven, Chopin, Liszt, Rachmaninoff …) | CC BY-NC-SA | for evaluation only |
+| Craig Sapp's Humdrum editions (Bach chorales, Mozart, Haydn, Scarlatti, Joplin …) | CC BY-NC-SA | for evaluation only |
 
-Check `modal run training/modal_app.py` with no arguments for the current
-status of the volume — what has been downloaded, prepared and trained.
+The non-commercial collections are useful for checking the composer's output
+against the real composers' statistics during development, but nothing
+learned from them is shipped. The model file records which collections it
+was learned from.
 
-## Training on your own machine
+To turn the OpenScore MuseScore files into MusicXML, MuseScore itself does
+the conversion: `mscore -o out.musicxml in.mscx` (or a batch job with
+`mscore -j jobs.json`).
 
-Only worth it to check the plumbing, not to get a usable model:
+## The older transformer tooling
 
-```
-python training/prepare.py --raw training/data/raw --out training/data/processed
-python training/train_local.py --preset tiny --steps 400
-```
-
-That trains a deliberately tiny model in about a minute on a laptop CPU. It
-writes a checkpoint of exactly the same shape as Modal's, so the whole chain
-— corpus, tokens, training, generation, engraving — is genuinely exercised
-rather than assumed.
-
-## What the corpus does and does not cover
-
-The public-domain Humdrum editions are strongest on Baroque and Classical
-keyboard writing, and on Chopin. They are thin on late Romantic piano —
-Rachmaninov and Scriabin are barely represented, because those editions are
-mostly still in copyright or not openly encoded.
-
-`training/corpus.py` documents the larger sets worth folding in when you
-have the bandwidth and have read their terms — PDMX in particular, which is
-a quarter of a million CC0 scores and by far the best single source for
-Romantic piano. Point `prepare.py` at any locally downloaded corpus with
-`--extra-dir` and every file it can read is used.
+`training/modal_app.py`, `prepare.py`, `model.py` and `train_local.py` train
+the token-level transformer used by earlier versions of Motif. The current
+composer does not use it; the engine still loads a checkpoint at
+`~/.motif/model.pt` only for the one kind of piece Motif's own composer does
+not yet write (piano concertos).

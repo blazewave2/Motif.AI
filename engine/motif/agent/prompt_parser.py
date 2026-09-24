@@ -294,6 +294,7 @@ def parse_prompt(prompt: str, *, seed: int | None = None,
             bars = min(bars, 16)
     if ensemble == "piano_concerto" and not mb:
         bars = max(bars, 96)
+    length_bars = bars if (mb or mm) else 0
 
     # -- metre -------------------------------------------------------------
     met = _METER_RE.search(text)
@@ -350,7 +351,7 @@ def parse_prompt(prompt: str, *, seed: int | None = None,
         title=_title(text, key, form, style.display, rng, moods),
         subtitle=_subtitle(ensemble, style),
         style=style.name, key=str(key), time=time, tempo=bpm, tempo_text=tempo_text,
-        tempo_given=tempo_given, time_given=time_given,
+        tempo_given=tempo_given, time_given=time_given, length_bars=length_bars,
         form=form, sections=sections, instruments=instruments,
         seed=rng.randint(1, 2 ** 30), prompt=prompt, character=character,
         ensemble=ensemble)

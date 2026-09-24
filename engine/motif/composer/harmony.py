@@ -357,12 +357,12 @@ _IMPRESSIONIST = HarmonyStyle(
         "major": _p((3, ["I(maj7)"]), (3, ["I(add9)", "IV(maj7)"]), (2, ["I(add6)", "bVII"]),
                     (2, ["I(maj7)", "ii7", "iii7"]), (1, ["I", "II"])),
         "minor": _p((3, ["i7"]), (3, ["i(add9)", "IV"]), (2, ["i7", "bVII"]),
-                    (2, ["i", "bVI(maj7)"])),
+                    (2, ["i", "VI(maj7)"])),
     },
     predominant={
         "major": _p((3, ["IV(maj7)"]), (3, ["ii7"]), (2, ["vi7"]), (2, ["bVII"]),
                     (1, ["II"])),
-        "minor": _p((3, ["iv7"]), (3, ["bVI(maj7)"]), (2, ["IV"]), (2, ["bVII"])),
+        "minor": _p((3, ["iv7"]), (3, ["VI(maj7)"]), (2, ["IV"]), (2, ["bVII"])),
     },
     dominant={
         "major": _p((3, ["V9"]), (2, ["V+"]), (2, ["bVII"]), (1, ["V13"])),
@@ -375,7 +375,7 @@ _IMPRESSIONIST = HarmonyStyle(
         "IAC": {"major": _p((2, ["V9", "I6"])), "minor": _p((2, ["v7", "i6"]))},
         "HC": {"major": _p((3, ["V9"]), (2, ["bVII"])), "minor": _p((3, ["v7"]),
                                                                (2, ["bVII"]))},
-        "DC": {"major": _p((3, ["V9", "vi7"])), "minor": _p((3, ["v7", "bVI(maj7)"]))},
+        "DC": {"major": _p((3, ["V9", "vi7"])), "minor": _p((3, ["v7", "VI(maj7)"]))},
         "plagal": {"major": _p((3, ["IV(maj7)", "I(add9)"])),
                    "minor": _p((3, ["iv7", "i(add9)"]))},
     },
@@ -383,7 +383,7 @@ _IMPRESSIONIST = HarmonyStyle(
     swaps={"major": {"IV": "IV(maj7)", "I": "I(add9)", "V": "bVII"},
            "minor": {"iv": "iv7", "i": "i(add9)", "v": "bVII"}},
     response={"major": _p((3, ["IV(maj7)"]), (2, ["bVII"]), (2, ["ii7", "iii7"]), (2, ["vi7"])),
-              "minor": _p((3, ["iv7"]), (2, ["bVII"]), (2, ["bVI(maj7)"]))},
+              "minor": _p((3, ["iv7"]), (2, ["bVII"]), (2, ["VI(maj7)"]))},
 )
 
 _FILM = replace(
@@ -432,6 +432,13 @@ class PhraseHarmonySpec:
     #: consequent restates its antecedent's opening over the same harmony).
     prefix: list["Harmony"] = field(default_factory=list)
     prefix_bars: int = 0
+    #: What the theme's second bar implies (T, S or D), so its opening two
+    #: bars are harmonised the way the tune suggests.
+    idea_bar2: str = ""
+    #: A sentence whose idea is repeated a number of scale steps away has its
+    #: opening chords moved the same distance (a true sequence); 0 means the
+    #: repeat is reharmonised from the style's own answers instead.
+    response_shift: int = 0
 
 
 def plan_phrase(spec: PhraseHarmonySpec, style: HarmonyStyle, rng: random.Random,
@@ -589,11 +596,25 @@ def _candidate(spec: PhraseHarmonySpec, style: HarmonyStyle, rng: random.Random
             tonic = _choose(style.predominant[mode] + style.tonic[mode][1:], rng)
         body = _fit(tonic, n_t) if len(tonic) >= n_t or n_t <= 2 else \
             _extend(tonic, n_t, style.tonic[mode], rng, tail=False)
+        if spec.idea_bar2 and n_t == 2 and not spec.prefix_bars:
+            # the theme's own harmony: tonic, then what its second bar implies
+            if spec.idea_bar2 == "D":
+                second = _choose(style.dominant[mode], rng)[-1]
+            elif spec.idea_bar2 == "S":
+                second = _choose(style.predominant[mode], rng)[0]
+            else:
+                second = body[-1] if len(body) > 1 else body[0]
+            body = [body[0] if core(body[0]) in ("I", "i") else ("i" if key.is_minor else "I"),
+                    second]
         # -- a sentence answers its idea: a dominant version, a sequence or
         # a reharmonisation
         if n_r:
-            pool = style.response.get(mode) or style.dominant[mode]
-            body += _fit(_choose(pool, rng), n_r)
+            if spec.response_shift % 7:
+                body += _fit([transpose_roman(r, spec.response_shift, key) for r in body[:n_t]],
+                             n_r)
+            else:
+                pool = style.response.get(mode) or style.dominant[mode]
+                body += _fit(_choose(pool, rng), n_r)
         # -- moving away through predominant harmony
         if n_s:
             if spec.kind == "continuation" and rng.random() < style.sequence:
@@ -632,6 +653,39 @@ def _candidate(spec: PhraseHarmonySpec, style: HarmonyStyle, rng: random.Random
     return _merge_repeats(out)
 
 
+_DEGREE_CHORDS = {
+    "major": ["I", "ii", "iii", "IV", "V", "vi", "viio"],
+    "minor": ["i", "ii%", "III", "iv", "V", "VI", "bVII"],
+}
+_DEGREE_OF = {"i": 0, "ii": 1, "iii": 2, "iv": 3, "v": 4, "vi": 5, "vii": 6,
+              "bii": 1, "biii": 2, "bvi": 5, "bvii": 6}
+
+
+def transpose_roman(roman: str, steps: int, key: Key) -> str:
+    """The chord ``steps`` degrees along the scale from ``roman``, as the key
+    itself would have it (in minor, V keeps its leading tone and the chord on
+    the seventh degree is the subtonic)."""
+    if steps % 7 == 0 or "/" in roman or roman[:2] in ("It", "Fr", "Ge", "Ca") or \
+            roman.startswith("N"):
+        return roman
+    c = core(roman)
+    deg = _DEGREE_OF.get(c.lower())
+    if deg is None:
+        return roman
+    mode = "minor" if key.is_minor else "major"
+    new = _DEGREE_CHORDS[mode][(deg + steps) % 7]
+    seventh = any(f in roman for f in ("7", "65", "43", "42", "9"))
+    if new == "ii%":
+        return "ii%7" if seventh or mode == "minor" else "iio"
+    if seventh:
+        if new == "viio":
+            return "vii%7"
+        if new in ("I", "IV", "III", "VI"):
+            return new + "(maj7)"
+        return new + "7"
+    return new
+
+
 def _applied_target(roman: str) -> str | None:
     return roman.split("/", 1)[1] if "/" in roman else None
 
@@ -647,9 +701,15 @@ def _goes_to(label: str, target: str) -> bool:
 
 def _resolve_applied(labels: list[str], key: Key) -> list[str]:
     """Every applied chord must go to its target; one that doesn't becomes
-    its target's own predominant preparation instead."""
+    its target's own predominant preparation instead. An augmented sixth
+    must open onto the dominant (or the cadential six-four)."""
     out = list(labels)
     for i, r in enumerate(out):
+        if r[:2] in ("It", "Fr", "Ge"):
+            nxt = out[i + 1] if i + 1 < len(out) else None
+            if nxt is None or not (core(nxt) == "V" or nxt.startswith("Cad")):
+                out[i] = "iv6" if key.is_minor else "ii6"
+            continue
         tgt = _applied_target(r)
         if tgt is None:
             continue
@@ -731,6 +791,117 @@ def _merge_repeats(hs: list[Harmony]) -> list[Harmony]:
 
 
 # ---------------------------------------------------------------------------
+# letting the melody have its say
+# ---------------------------------------------------------------------------
+#: What a chord may become when the tune over it asks: the same chord
+#: coloured, or another chord doing the same job.
+_ALTERNATIVES = {
+    "major": {
+        "I": ["I", "I6", "I(add6)", "I(maj7)", "I(add9)", "vi", "iii", "vi7"],
+        "vi": ["vi", "vi7", "I6", "iii", "IV(maj7)"],
+        "iii": ["iii", "iii7", "I6", "V6"],
+        "IV": ["IV", "IV(maj7)", "ii7", "ii65", "ii", "IV(add6)", "iv", "iv(add6)"],
+        "ii": ["ii", "ii7", "ii65", "IV", "IV(add6)", "ii%7"],
+        "V": ["V", "V7", "V9", "V65", "V43", "viio7"],
+        "vii": ["viio7", "V7", "viio6"],
+    },
+    "minor": {
+        "i": ["i", "i6", "i7", "i(add6)", "i(add9)", "i(maj7)", "VI", "III"],
+        "VI": ["VI", "VI(maj7)", "iv6", "i6"],
+        "III": ["III", "i6", "III+"],
+        "iv": ["iv", "iv7", "iv6", "iv(add6)", "ii%65", "ii%7", "VI", "N6"],
+        "ii": ["ii%7", "ii%65", "iv", "iv(add6)", "iv6"],
+        "V": ["V", "V7", "V7b9", "V9", "V65", "viio7"],
+        "vii": ["viio7", "V7", "viio65"],
+        "bVII": ["bVII", "bVII7", "v7"],
+        "N": ["N6", "iv", "iv6"],
+    },
+}
+_PLAIN_STYLES = ("classical", "baroque")
+
+
+def _alternatives(roman: str, key: Key, style: HarmonyStyle) -> list[str]:
+    if "/" in roman or roman[:2] in ("It", "Fr", "Ge", "Ca"):
+        return []
+    table = _ALTERNATIVES["minor" if key.is_minor else "major"]
+    c = core(roman)
+    opts = table.get(c) or table.get(c.lower()) or []
+    if style.name in _PLAIN_STYLES:
+        opts = [o for o in opts if "(" not in o and "b9" not in o and "+" not in o]
+    return opts
+
+
+def revise(harmonies: list[Harmony], melody, style: HarmonyStyle, key: Key, beat: F,
+           protect: int = 2, keep_first: bool = True) -> list[Harmony]:
+    """Recolour or replace chords that fight the melody written over them,
+    keeping each chord's function, and leaving the cadence alone (its last
+    ``protect`` chords). A long or accented melody note that is not in its
+    chord and does not resolve like a passing note is what counts."""
+    notes = sorted((n for n in melody), key=lambda n: n.onset)
+    out: list[Harmony] = []
+    fixed_from = max(0, len(harmonies) - protect)
+    for i, h in enumerate(harmonies):
+        if i >= fixed_from or h.cadence:
+            out.append(h)
+            continue
+        weights = _melody_weights(notes, h, beat)
+        if not weights:
+            out.append(h)
+            continue
+
+        def clash(pcs: set[int]) -> float:
+            return sum(w for pc, w in weights if pc not in pcs)
+
+        base = clash(h.pcs)
+        if base < 0.6:
+            out.append(h)
+            continue
+        best, best_cost = h, base
+        for alt in _alternatives(h.roman, key, style):
+            if alt == h.roman:
+                continue
+            if keep_first and i == 0 and core(alt) != core(h.roman):
+                continue          # a phrase keeps its opening chord, at most coloured
+            try:
+                cand = Harmony(alt, key, h.onset, h.dur, pedal=h.pedal)
+            except Exception:
+                continue
+            cost = clash(cand.pcs)
+            cost += 0.35 if core(alt) == core(h.roman) else 0.8
+            if cand.bass_pc != h.bass_pc:
+                cost += 0.4
+            if "(" in alt and style.name not in ("russian", "impressionist", "film"):
+                cost += 0.3
+            if cost < best_cost - 0.25:
+                best, best_cost = cand, cost
+        out.append(best)
+    return _merge_repeats(out)
+
+
+def _melody_weights(notes, h: Harmony, beat: F) -> list[tuple[int, float]]:
+    """(pitch class, weight) of each melody note sounding over ``h``: how
+    long it sounds, more if it starts on a beat, much less if it is a short
+    note passing by step."""
+    out = []
+    for k, n in enumerate(notes):
+        a, b = max(n.onset, h.onset), min(n.onset + n.dur, h.onset + h.dur)
+        if b <= a:
+            continue
+        w = float(b - a)
+        on_beat = n.onset >= h.onset and (n.onset - h.onset) % beat == 0
+        if on_beat:
+            w *= 1.5
+        prev = notes[k - 1].midi if k else None
+        nxt = notes[k + 1].midi if k + 1 < len(notes) else None
+        stepwise = prev is not None and nxt is not None and abs(n.midi - prev) <= 2 and \
+            abs(nxt - n.midi) <= 2
+        if n.dur <= beat / 2 and stepwise:
+            w *= 0.2
+        out.append((n.midi % 12, w))
+    return out
+
+
+# ---------------------------------------------------------------------------
 # judging a progression
 # ---------------------------------------------------------------------------
 def score_progression(hs: list[Harmony], spec: PhraseHarmonySpec) -> float:
@@ -753,6 +924,8 @@ def score_progression(hs: list[Harmony], spec: PhraseHarmonySpec) -> float:
         tgt = _applied_target(a)
         if tgt is not None and not _goes_to(b, tgt):
             s -= 4.0                      # an applied chord that doesn't resolve
+        if a[:2] in ("It", "Fr", "Ge") and not (core(b) == "V" or b.startswith("Cad")):
+            s -= 4.0
     distinct = len(set(romans))
     s += 0.35 * min(distinct, 6)
     # the tonic should not keep coming back within a phrase

@@ -23,6 +23,7 @@ from fractions import Fraction as F
 
 from ..theory.pitch import Key, Pitch
 from .harmony import Harmony, harmony_at, spell as spell_in_chord
+from .style_model import melody_model
 
 
 # ---------------------------------------------------------------------------
@@ -49,6 +50,7 @@ class MelodyStyle:
     cells: str = "lyrical"         # which rhythm family
     ornament: float = 0.1          # turns, grace notes on restatements
     octaves: float = 0.0           # doubling the melody in octaves at climaxes
+    learned: float = 1.0           # how much the learned model of real melodies counts
 
 
 MELODY_STYLES: dict[str, MelodyStyle] = {
@@ -124,13 +126,19 @@ CELLS["grand"] = _cells({
     "idea": {(4, 4): [[2, 2], [1, 1, 2], [3, 1], ["3/2", "1/2", 2], [2, 1, 1], [1, 3],
                       ["1/2", "1/2", 1, 2], ["2/3", "2/3", "2/3", 2], [1, "1/2", "1/2", 2],
                       ["3/2", "1/2", 1, 1], [2, "1/2", "1/2", 1]],
-             (3, 4): [[2, 1], [3], [1, 2]], (6, 8): [["3/2", "3/2"], [3]],
-             (2, 4): [[1, 1], [2]], (12, 8): [[3, 3], ["3/2", "3/2", 3]],
+             (3, 4): [[2, 1], [1, 2], ["3/2", "1/2", 1], [1, "1/2", "1/2", 1],
+                      [2, "1/2", "1/2"], ["1/2", "1/2", 2], ["2/3", "2/3", "2/3", 1]],
+             (6, 8): [["3/2", "3/2"], [1, "1/2", "3/2"], ["3/2", 1, "1/2"],
+                      ["1/2", "1/2", "1/2", "3/2"]],
+             (2, 4): [[1, 1], ["3/2", "1/2"], ["1/2", "1/2", 1]],
+             (12, 8): [[3, 3], ["3/2", "3/2", 3], [1, "1/2", "3/2", 3],
+                       ["3/2", 1, "1/2", 3]],
              (2, 2): [[2, 2], [1, 1, 2], [3, 1]]},
     "flow": {(4, 4): [[1, 1, 1, 1], [2, 1, 1], [1, 1, 2], ["1/2", "1/2", 1, 1, 1],
                       [1, "1/2", "1/2", 1, 1], ["2/3", "2/3", "2/3", 1, 2],
-                      ["3/2", "1/2", "1/2", "1/2", 1]], (3, 4): [[1, 1, 1], [2, 1],
-                      ["1/2", "1/2", 1, 1]],
+                      ["3/2", "1/2", "1/2", "1/2", 1]],
+             (3, 4): [[1, 1, 1], [2, 1], ["1/2", "1/2", 1, 1], [1, "1/2", "1/2", 1],
+                      ["2/3", "2/3", "2/3", 1], ["1/2", "1/2", "1/2", "1/2", 1]],
              (6, 8): [[1, "1/2", 1, "1/2"], ["3/2", "3/2"], ["1/2", "1/2", "1/2", "3/2"],
                       ["3/4", "1/4", "1/2", 1, "1/2"]], (2, 4): [[1, 1], ["1/2", "1/2", 1]],
              (12, 8): [["3/2", "3/2", "3/2", "3/2"], [1, "1/2", 1, "1/2", 3]],
@@ -158,8 +166,9 @@ CELLS["motoric"] = _cells({
              (6, 8): [["1/2"] * 6, [1, "1/2", 1, "1/2"]], (12, 8): [["1/2"] * 12]},
     "flow": {(4, 4): [["1/4"] * 16, ["1/4"] * 8 + ["1/2"] * 4], (3, 4): [["1/4"] * 12],
              (2, 4): [["1/4"] * 8], (6, 8): [["1/2"] * 6], (12, 8): [["1/2"] * 12]},
-    "close": {(4, 4): [[1, 1, 2], [2, 2], [4]], (3, 4): [[2, 1], [3]], (2, 4): [[2]],
-              (6, 8): [[3]], (12, 8): [[6]]},
+    "close": {(4, 4): [[1, 1, 2], [2, 2], ["1/2", "1/2", 1, 2]], (3, 4): [[2, 1], [1, 1, 1]],
+              (2, 4): [[1, 1], ["1/2", "1/2", 1]], (6, 8): [["3/2", "3/2"], [1, "1/2", "3/2"]],
+              (12, 8): [[3, 3], ["3/2", "3/2", 3]]},
 })
 CELLS["floating"] = _cells({
     "idea": {(4, 4): [[3, 1], [1, 3], [2, 2], ["3/2", "1/2", 2]], (3, 4): [[2, 1], [3]],
@@ -170,7 +179,22 @@ CELLS["floating"] = _cells({
 })
 
 
+#: Set while composing something a learner can play: no note shorter than an
+#: eighth and no triplets.
+SIMPLE = {"on": False}
+
+
+def _easy(cells: list[list[F]]) -> list[list[F]]:
+    ok = [c for c in cells if min(c) >= F(1, 2) and all(v.denominator in (1, 2) for v in c)]
+    return ok or cells
+
+
 def cells_for(family: str, role: str, time: tuple[int, int]) -> list[list[F]]:
+    out = _cells_for(family, role, time)
+    return _easy(out) if SIMPLE["on"] else out
+
+
+def _cells_for(family: str, role: str, time: tuple[int, int]) -> list[list[F]]:
     fam = CELLS.get(family, CELLS["lyrical"])
     by_time = fam.get(role, fam["idea"])
     if time in by_time:
@@ -195,6 +219,8 @@ class Motif:
     steps: list[int]                     # scale steps from note to note through both bars
     anacrusis: list[F] = field(default_factory=list)   # upbeat values, if any
     second: list[F] = field(default_factory=list)      # the basic idea's second bar
+    start_degree: int = 0                # the scale degree it starts on (0 = tonic)
+    bar2: str = "T"                      # the harmony its second bar implies: T, S or D
 
     def __str__(self) -> str:
         return f"rhythm={[str(x) for x in self.rhythm]}+{[str(x) for x in self.second]} " \
@@ -232,9 +258,13 @@ def invent_motif(style: MelodyStyle, time: tuple[int, int], rng: random.Random,
 
 
 def _random_motif(style: MelodyStyle, time: tuple[int, int], rng: random.Random,
-                  shapes: int = 48) -> Motif:
-    """A rhythm for the idea's two bars and the best of many contours for it."""
+                  shapes: int = 48, lively: bool = False) -> Motif:
+    """A rhythm for the idea's two bars and the best of many contours for it.
+    A lively idea (a contrasting theme that presses forward) may take its
+    rhythm from the flowing cells too."""
     ideas = cells_for(style.cells, "idea", time)
+    if lively:
+        ideas = ideas + [c for c in cells_for(style.cells, "flow", time) if len(c) >= 3]
     rhythm = list(rng.choice(ideas))
     closes = cells_for(style.cells, "close", time)
     if style.cells not in ("grand", "floating", "lyrical") or rng.random() < 0.6:
@@ -254,9 +284,54 @@ def _random_motif(style: MelodyStyle, time: tuple[int, int], rng: random.Random,
             size = rng.choices(sizes, ws)[0]
             steps.append(size if rng.random() < 0.5 else -size)
         m = Motif(rhythm, steps, ana, second)
-        sc = motif_score(m, style)
+        fit, start, bar2 = implied_harmony(m, time)
+        m.start_degree, m.bar2 = start, bar2
+        sc = motif_score(m, style) + fit
         if sc > best_score:
             best, best_score = m, sc
+    return best
+
+
+#: Scale degrees (0 = tonic) of the chords a theme's opening can imply.
+_FUNCTION_DEGREES = {"T": {0, 2, 4}, "D": {4, 6, 1, 3}, "S": {3, 5, 0, 1}}
+
+
+def implied_harmony(m: Motif, time: tuple[int, int]) -> tuple[float, int, str]:
+    """Where the idea should start (on the tonic, third or fifth) and what
+    its second bar implies (tonic, subdominant or dominant), so that its
+    long and accented notes are chord tones and only its passing notes are
+    not: (fit bonus, start degree, second-bar function)."""
+    beat = F(3, 2) if (time[1] == 8 and time[0] % 3 == 0) else F(4, time[1])
+    notes = []                                   # (onset in bar, dur, bar index)
+    t = F(0)
+    for d in m.rhythm:
+        notes.append((t, d, 0))
+        t += d
+    t = F(0)
+    for d in m.second:
+        notes.append((t, d, 1))
+        t += d
+    pos = m.contour
+    best = (-1e9, 0, "T")
+    for start in (0, 2, 4):
+        for bar2 in ("T", "D", "S"):
+            pen = 0.0
+            for k, (on, d, b) in enumerate(notes):
+                deg = (start + pos[k]) % 7
+                chord = _FUNCTION_DEGREES["T" if b == 0 else bar2]
+                if deg in chord:
+                    continue
+                w = float(d) * (1.5 if on % beat == 0 else 1.0)
+                prev_step = pos[k] - pos[k - 1] if k else None
+                next_step = pos[k + 1] - pos[k] if k + 1 < len(pos) else None
+                passing = prev_step is not None and next_step is not None and \
+                    abs(prev_step) == 1 and abs(next_step) == 1 and d < beat
+                pen += w * (0.25 if passing else 1.0)
+            # the first note on the tonic triad, the strongest start on 1 or 5
+            fit = 2.0 - 1.2 * pen - (0.2 if start == 2 else 0.0)
+            fit -= 0.3 if bar2 == "T" else 0.0     # a second bar that moves is livelier
+            if fit > best[0]:
+                best = (fit, start, bar2)
     return best
 
 
@@ -370,6 +445,8 @@ class PhrasePlan:
     anacrusis: list[F] = field(default_factory=list)   # upbeat values leading into bar 1
     prev_harmony: Harmony | None = None                 # the chord under the upbeat
     tail_room: F = F(0)            # leave this much of the last bar for the next upbeat
+    response_shift: int = 0        # how far the harmony moved the idea's repeat (0: free)
+    imitate: bool = False          # the other hand answers the idea a bar later, below
 
 
 @dataclass
@@ -384,6 +461,7 @@ class Slot:
     src_pitch: int | None = None    # …or this remembered pitch
     anchor: int | None = None       # the first slot of this imitation unit
     fixed: int | None = None        # an exact pitch to restate (a recalled bar)
+    lower: int | None = None        # the slot whose note the other hand answers with here
 
 
 def roles_for(kind: str, bars: int) -> list[str]:
@@ -433,6 +511,8 @@ class MelodyWriter:
         self.rng = rng
         self.beam = beam
         self.time = time
+        self.last_cost = 0.0                         # what the last phrase cost the search
+        self.model = melody_model()
         self.theme_bars: list[list[MelNote]] = []    # bar-by-bar memory of the first theme
         self.theme_key: Key | None = None            # the key it was written in
         self.upbeat: list[int] = []                  # scale steps from each upbeat note to the downbeat
@@ -458,7 +538,8 @@ class MelodyWriter:
             dense = [c for c in cells if len(c) > len(m.rhythm)]
             pool = dense if dense and self.rng.random() < 0.7 else cells
             r = list(self.rng.choice(pool))
-            if self.rng.random() < self.style.triplets and time in ((4, 4), (3, 4), (2, 4)):
+            if self.rng.random() < self.style.triplets and time in ((4, 4), (3, 4), (2, 4)) \
+                    and not SIMPLE["on"]:
                 # a bar that breaks into triplets for a beat
                 pos = self.rng.randrange(len(r))
                 if r[pos] == 1:
@@ -518,6 +599,15 @@ class MelodyWriter:
                 first_idea = b
             elif role == "idea2" and second_idea is None:
                 second_idea = b
+                if plan.imitate and first_idea is not None and first_idea in bar_slots:
+                    # against the answer: the subject, a bar later, below
+                    model = bar_slots[first_idea]
+                    for i in idxs:
+                        rel = slots[i].t - plan.bar_len
+                        for j in model:
+                            if slots[j].t <= rel < slots[j].t + slots[j].d:
+                                slots[i].lower = j
+                                break
             # -- what this bar imitates
             if role in ("repeat", "repeat2"):
                 model = first_idea if role == "repeat" else second_idea
@@ -662,6 +752,7 @@ class MelodyWriter:
         """Whole-phrase judgement among the finalists: one climax, a real
         cadence, and enough variety."""
         best, best_score = None, 1e18
+        self.last_cost = 0.0
         for cost, seq in beam:
             extra = 0.0
             top = max(seq)
@@ -678,9 +769,12 @@ class MelodyWriter:
             distinct = len(set(seq))
             if distinct < min(5, len(seq)):
                 extra += 2.0
+            # the phrase should reach the height it was planned to
+            extra += 0.8 * max(0, plan.peak - 2 - top)
             total = cost + extra
             if total < best_score:
                 best, best_score = seq, total
+        self.last_cost = best_score
         return best
 
     def _note_cost(self, m: int, prev: int | None, prev2: int | None, i: int, sl: Slot,
@@ -706,6 +800,11 @@ class MelodyWriter:
                     c += 4.0
             elif prev is not None and abs(m - prev) > 2:
                 c += 2.5          # a dissonance is approached by step…
+            beat = plan.bar_len / (plan.time[0] if plan.time[1] == 4 or plan.time[0] % 3
+                                   else plan.time[0] // 3)
+            if d >= beat and not strong:
+                # a long dissonance off the beat is no passing note
+                c += 1.2 + 0.8 * float(d / beat - 1)
         if strong and chord:
             c -= 0.4
         # the note before must resolve if it was a dissonance
@@ -733,8 +832,22 @@ class MelodyWriter:
                     c += 0.8                        # two leaps in one direction
             if m == prev and d < F(1, 2):
                 c += 0.8
+            if prev2 is not None and m == prev == prev2:
+                c += 1.5                                # a note hammered three times
+            if len(seq) >= 3 and m == seq[-2] and prev == seq[-3] and m != prev:
+                c += 1.2                                # trilling back and forth
+        # -- what real melodies do
+        model = self.model
+        if model is not None and prev is not None and st.learned:
+            w = st.learned
+            c += w * 0.35 * model.interval_cost(prev - prev2 if prev2 is not None else None,
+                                                m - prev)
+            tonic = plan.key.tonic_pc
+            c += w * 0.25 * model.degree_cost(plan.key.is_minor, prev - tonic, m - tonic)
+            if strong:
+                c += w * 0.15 * model.strong_cost(plan.key.is_minor, m - tonic)
         # -- contour
-        c += 0.10 * abs(m - inf.target)
+        c += 0.15 * abs(m - inf.target)
         # -- the climax belongs where it was planned
         if m >= plan.peak - 1 and abs(sl.t - peak_pos) > plan.bar_len * F(3, 2):
             c += 2.5
@@ -746,10 +859,13 @@ class MelodyWriter:
                 want = None
             if want is not None:
                 got = _scale_steps(prev, m, plan.key)
-                c += 0.9 * abs(got - want)
+                c += 1.5 * abs(got - want)
             elif idx_in_bar == 0 and self.upbeat and i > 0 and slots[i - 1].role == "ana":
                 got = _scale_steps(prev, m, plan.key)
                 c += 0.9 * abs(got + self.upbeat[-1])
+        if sl.role == "idea" and (i == 0 or slots[i - 1].role in ("ana",)) :
+            if key_degree(m, plan.key) != self.motif.start_degree:
+                c += 2.0
         # -- restating and developing: the same shape, moved as a whole
         if sl.fixed is not None:
             c += 0.8 * abs(m - sl.fixed)
@@ -757,7 +873,12 @@ class MelodyWriter:
             base = seq[sl.src] if sl.src is not None else sl.src_pitch
             if sl.anchor == i:
                 shift = _scale_steps(base, m, plan.key)
-                c += _shift_cost(shift, sl.role, sl.t < peak_pos, inf.same_chord_as_src)
+                if sl.role in ("repeat", "repeat2") and plan.response_shift % 7:
+                    # the harmony has moved the idea: the tune moves with it
+                    c += 0.0 if (shift - plan.response_shift) % 7 == 0 and abs(shift) <= 5 \
+                        else 3.0
+                else:
+                    c += _shift_cost(shift, sl.role, sl.t < peak_pos, inf.same_chord_as_src)
             else:
                 a = slots[sl.anchor]
                 a_base = seq[a.src] if a.src is not None else a.src_pitch
@@ -765,6 +886,20 @@ class MelodyWriter:
                     shift = _scale_steps(a_base, seq[sl.anchor], plan.key)
                     want = _transpose_steps(base, shift, plan.key)
                     c += 1.0 * abs(m - want)
+        # -- counterpoint with the answering hand
+        if sl.lower is not None and sl.lower < len(seq):
+            low = seq[sl.lower] - 12
+            while low > m - 3:
+                low -= 12
+            ic = (m - low) % 12
+            if ic in (1, 2, 5, 6, 10, 11):
+                c += 2.2 if (strong or d >= F(1, 2)) else 0.6
+            if i and slots[i - 1].lower is not None and prev is not None:
+                plow = seq[slots[i - 1].lower] - 12
+                while plow > prev - 3:
+                    plow -= 12
+                if ic in (0, 7) and (prev - plow) % 12 == ic and m != prev:
+                    c += 2.5
         # -- counterpoint with the bass: no parallel fifths or octaves on beats
         if strong and inf.bass is not None and inf.bass_prev is not None and prev is not None:
             b_now, b_prev = inf.bass, inf.bass_prev
@@ -820,7 +955,7 @@ def _shift_cost(shift: int, role: str, before_peak: bool, same_chord: bool) -> f
     sequence towards the climax and fall away after it."""
     if role in ("repeat", "repeat2"):
         if shift == 0:
-            return 1.2 if same_chord else 0.2
+            return 1.8 if same_chord else 0.7
         return {1: 0.0, -1: 0.3, 2: 0.3, -2: 0.4, 3: 0.7, -3: 0.6, 4: 0.9, -4: 1.2
                 }.get(shift, 3.0)
     if before_peak:
@@ -938,6 +1073,11 @@ def _scale_steps(a: int, b: int, key: Key) -> int:
     """Signed number of scale steps from ``a`` to ``b`` (chromatic notes count
     as the degree they inflect)."""
     return _degree_of(b, key)[0] - _degree_of(a, key)[0]
+
+
+def key_degree(m: int, key: Key) -> int:
+    """The scale degree of a pitch counted from the tonic (0..6)."""
+    return (_degree_of(m, key)[0] - _degree_of(key.tonic_pc + 60, key)[0]) % 7
 
 
 def _degree_of(m: int, key: Key) -> tuple[int, int]:

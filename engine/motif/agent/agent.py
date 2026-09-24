@@ -200,13 +200,14 @@ class MotifAgent:
             plan.instruments = build_instruments(req.ensemble)
         return plan
 
-    def _compose(self, plan: CompositionPlan) -> tuple[Score, list[str], dict]:
+    def _compose(self, plan: CompositionPlan, theme=None, form: str | None = None
+                 ) -> tuple[Score, list[str], dict]:
         """Motif's composer writes the piece; concertos, which it does not
         yet score, still go to the earlier engine."""
         ensemble = plan.ensemble or "solo_piano"
         if not plan.movements and (ensemble == "solo_piano" or _arrange.supported(ensemble)):
             composer = Composer(plan, quality=self.options.get("quality", "best"),
-                                progress=self.report)
+                                progress=self.report, theme=theme, form=form)
             score = composer.compose()
             plan.tempo = int(composer.tempo)
             plan.tempo_text = composer.tempo_text
@@ -215,10 +216,11 @@ class MotifAgent:
         return compose(plan, self.model, progress=self.report), [], {}
 
     def _finish(self, plan: CompositionPlan, message,
-                warnings: list[str] | None = None) -> Result:
+                warnings: list[str] | None = None, theme=None, form: str | None = None
+                ) -> Result:
         """Compose ``plan``. ``message`` is the reply, or a function of the
         plan and what the composer decided that writes it."""
-        score, notes, summary = self._compose(plan)
+        score, notes, summary = self._compose(plan, theme=theme, form=form)
         if callable(message):
             message = message(plan, summary)
         return Result(ok=True, message=message, musicxml=to_musicxml(score),
@@ -268,8 +270,13 @@ class MotifAgent:
         plan.sections = sections
         plan.title = existing.title or plan.title
         plan.subtitle = existing.subtitle or plan.subtitle
-
-        result = self._finish(plan, "")
+        # the continuation keeps the page's metre and tempo, and works with
+        # the musician's own theme
+        plan.time_given = True
+        plan.tempo_given = True
+        plan.tempo_text = ""
+        from ..composer.listen import theme_from_score
+        result = self._finish(plan, "", theme=theme_from_score(existing), form="continuation")
         merged = _append_scores(existing, read_musicxml(result.musicxml))
         result.musicxml = to_musicxml(merged)
         result.midi = to_midi(merged)
@@ -295,8 +302,10 @@ class MotifAgent:
         for s in plan.sections:
             s.motif_op = "develop" if s.motif_op == "state" else s.motif_op
             s.energy = min(1.0, s.energy + 0.12)
+        plan.time_given = True
+        from ..composer.listen import theme_from_score
         return self._finish(plan, _voice.developed_message(
-            plan, existing.title, self.voice_model))
+            plan, existing.title, self.voice_model), theme=theme_from_score(existing))
 
     def _harmonize(self, req: Request, existing: Score, info: ScoreAnalysis) -> Result:
         """Keep the user's melody, write an accompaniment underneath it."""

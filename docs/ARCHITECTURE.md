@@ -2,17 +2,20 @@
 
 ```
   MuseScore                                Local machine only
- ┌───────────────────────┐                ┌──────────────────────────────┐
- │  Motif.AI panel (QML) │  HTTP/JSON     │  Motif engine (Python)       │
- │  ─────────────────────│───────────────▶│  ──────────────────────────  │
- │  prompt, examples,    │  127.0.0.1     │  agent → plan → score        │
- │  conversation         │◀───────────────│  MusicXML + MIDI             │
- └───────────────────────┘   MusicXML     └──────────────────────────────┘
-            │                                            │
-            └── readScore() opens it in a new tab        └── optional:
-                                                            torch checkpoint
-                                                            Claude planner
+ ┌───────────────────────┐                ┌──────────────────────────────────┐
+ │  Motif.AI panel (QML) │  HTTP/JSON     │  Motif engine (Python, stdlib)   │
+ │  ─────────────────────│───────────────▶│  ──────────────────────────────  │
+ │  prompt, conversation,│  127.0.0.1     │  agent → composer → notation     │
+ │  progress, Stop, Care │◀───────────────│  MusicXML + MIDI                 │
+ └───────────────────────┘   MusicXML     └──────────────────────────────────┘
+            │
+            └── readScore() opens it (or reloads the score it changed)
 ```
+
+Nothing leaves the computer. The composer is Motif's own — rules of harmony,
+voice leading, form and idiom, plus a small statistical model of melody
+learned from public-domain scores — and needs no network, no language model
+and no packages beyond Python itself.
 
 ## Why MusicXML rather than the cursor API
 
@@ -36,95 +39,84 @@ out with C♭ and B major with A♯.
 count alone cannot distinguish ♯4 from ♭5, which is why a naive engine writes
 a diminished seventh as D–F–G♯–B instead of D–F–A♭–C♭.
 
-### `compose/`
+### `composer/` — Motif's composer
 
 | Module | Responsibility |
 |---|---|
-| `styles.py` | 23 composer profiles: textures, chromaticism rates, dynamic range, registers, hand span, ornaments, and the scale collections a style colours with — whole-tone and pentatonic for Debussy, octatonic for Scriabin |
-| `forms.py` | 30 formal templates producing a section map — bars, key, energy, texture, cadence, motif operation |
-| `material.py` | Motifs as scale-degree steps, with inversion, retrograde, augmentation, fragmentation, sequence |
-| `progression.py` | Functional progressions coloured with applied dominants, borrowed chords, extensions |
-| `voicing.py` | Voicing search scored for parallels, spacing, doubling and tendency-tone resolution |
-| `melody.py` | A contour skeleton for registral shape, then the whole line spun continuously from the seed motif — developing variation, not a fresh line generated note by note |
-| `textures.py` | 20 accompaniment idioms, each constrained to a playable hand span |
-| `orchestration.py` | Role-based distribution across 13 ensembles |
-| `composer.py` | Assembles all of it, adds pedalling, slurs, articulation |
-| `expression.py` | The performance layer: tempo map, per-note velocity, phrase hairpins |
+| `profiles.py` | One profile per composer: harmonic and melodic idiom, textures per kind of passage, pedalling, dynamics, rubato, ornament, tempo words |
+| `form.py` | The piece as phrases: sections, keys, cadences, energy, texture, returns; genre and metre from the request |
+| `harmony.py` | Functional phrase harmony in each style's vocabulary; sequences that move with the tune; revision of chords that fight the melody |
+| `melody.py` | Theme invention (rhythm, contour, implied harmony) and the beam search that writes every phrase, with repeats and sequences as imitation units |
+| `style_model.py` | The learned statistics of real melodies (`data/melody.json`) as search costs |
+| `texture.py` | Accompaniment idioms, voice-led and inside the hand |
+| `arrange.py` | The same material scored for any ensemble |
+| `notation.py` | Writing it all down as Motif Score Notation |
+| `core.py` | The composer itself: form → themes → phrases → texture → performance marks, with progress and Stop |
+
+How it composes is described in **[COMPOSER.md](COMPOSER.md)**.
+
+### `notation/`
+
+Motif Score Notation (MSN) is a plain-text score format with no hidden
+state: every note carries its own pitch and duration, every bar is numbered,
+every voice is on its own labelled line. `msn.py` parses it and reports every
+problem with its bar and voice; `validate.py` checks bar lengths, hand spans
+and instrument ranges; `to_score.py` turns it into the engine's `Score`,
+including the performance layer in `perform.py` (per-note velocities shaped
+by phrase, register and beat; tempo marks that rit. and accel. are heard);
+`from_score.py` goes the other way.
+
+### `engrave/`
+
+`musicxml.py` writes MusicXML 3.1 that validates against the schema and opens
+cleanly in MuseScore 3 and 4; `musicxml_reader.py` reads a score back from the
+panel; `beaming.py` groups eighths and shorter by the metre; `midi.py` writes
+the MIDI file.
 
 ### `agent/`
 
 `prompt_parser.py` is the deterministic understanding layer — style, key,
-metre, tempo, form, mood, scope and ensemble from free text. It runs first,
-always. `llm_planner.py` optionally hands the draft plan to Claude for
-revision, and **validates every field it gets back** against the allowed sets;
-anything unrecognised falls back to the draft. `agent.py` routes six intents:
-create, continue, develop, harmonize, edit, analyze.
+metre, tempo, form, mood, scope and ensemble from free text, noting which of
+them the musician actually named. `agent.py` routes six intents: create,
+continue, develop, harmonize, edit, analyze. New pieces, continuations and
+developments are written by the composer; the reply describing the piece is
+built from what the composer decided (`voice.py`). `session.py` keeps each
+conversation.
 
 Neither the composer nor the instrumentation is ever a stored setting — both
 come from the prompt on every request. "Continue in the same style" is
 resolved two ways, in order: the exact style, ensemble and instrumentation
 Motif itself recorded when it wrote the score (see "Provenance survives the
 round trip" below) when that survives, and a note-based heuristic (chromaticism,
-polyphony, ornament rate, register, tempo) when it does not — a hand-written
-score, say, or one edited enough that re-guessing is worth it. Continuing or
-developing a piece rebuilds the instrument list from what is actually on the
-page (`_instruments_from_score`, matched by name and General MIDI program) so
-a concerto stays a concerto; naming different or larger forces in the request
-("continue this for a string quartet") is still honoured, and the merge adds
-the new parts silent for what was already written rather than pasting one
-instrument's line under another's name.
+polyphony, ornament rate, register, tempo) when it does not.
 
-`voice.py` owns the plain-language replies shown in the panel — several
-genuinely different phrasings per situation, chosen deterministically from
-the piece's own seed, rather than one fixed sentence filled in every time.
-It never touches a note. `VoiceModel` is an extension point for a future
-small local text model to rewrite these further; none is bundled today, so
-it is always `None` and the templates answer directly.
+### `server/`
 
-### `model/`
+A stdlib HTTP server on 127.0.0.1. Composing runs as a background job
+(`jobs.py`): the panel starts it, polls its progress (stage, label, fraction)
+and can stop it at any point — the composer checks for Stop at every stage
+and nothing is written if it is stopped. The *Care* setting
+(`composer_quality`: sketch, balanced, best, maximum) chooses how many ideas
+the composer weighs.
 
-`tokenizer.py` is stdlib-only and shared with training. `runtime.py` imports
-torch lazily and degrades to `None` on any failure, so a missing or broken
-checkpoint never stops the engine composing.
+### `compose/` and `model/` — the earlier engine
 
-## The performance layer
-
-Notes alone play back like a typewriter. `expression.py` runs after the music
-exists and shapes three things a performer shapes:
-
-**Tempo.** Phrases ease into their cadences, developments press forward, and
-the piece slows at its close, written as real marks — *poco rit.*, *a tempo*,
-*stringendo*, *rall.* How much give a style takes is a per-composer constant:
-Bach 0.03, Chopin 0.20, Liszt 0.22. A Rachmaninov concerto ends up with a
-tempo change roughly every five bars, ranging from 52 to 92; a Bach fugue gets
-its opening tempo and a closing *rit.*, and nothing else.
-
-**Volume.** Every note's velocity comes from where it sits in its phrase, how
-high it is, where the beat falls, how long it is, and what is marked on it,
-plus a little unevenness. Stepping between eight printed marks is what makes
-playback sound typed. The melody is voiced above the accompaniment by a fixed
-offset, which is how a pianist balances the hands.
-
-**Rhythm.** Accompaniment figures vary bar to bar — resting on the last beat,
-holding through, halving their motion, taking a dotted lilt, grouping 3+3+2,
-or turning over in triplets. Before this, one Rachmaninov prelude used the
-same bar-rhythm thirty-eight times out of forty.
-
-Phrases are detected from slur ends, but *merged* into period-length spans:
-shaping every slur would put a hairpin under every bar, which is the opposite
-of phrasing.
+The engine Motif used before its own composer still supplies the vocabulary
+the request parser reads, writes piano concertos, and harmonises a melody the
+musician has written. `model/` loads an optional transformer checkpoint for
+it. Neither is used for anything the new composer writes.
 
 ## Design decisions worth knowing
 
 **The engine has no required dependencies.** A musician installing a MuseScore
 plugin should not have to create a virtualenv. Everything in `engine/` runs on
-the standard library, including the HTTP server. torch and the Claude planner
-are strictly optional.
+the standard library, including the HTTP server and the composer.
 
-**Bars are guaranteed complete.** `layout.place_voice` splits notes at bar
-lines and at beat boundaries, tying the pieces, then every voice is padded to
-the bar. The test suite asserts this across every style, form and ensemble —
-an incomplete bar is the one error that makes a score unusable.
+**Bars are guaranteed complete.** The composer writes its notes as MSN, which
+is validated bar by bar before anything is engraved; a bar of the wrong
+length, a chord no hand can span or a note outside an instrument is reported
+as an error, and the test suite composes every style and ensemble and asserts
+there are none.
 
 **Ranges are clamped last.** Octave doubling and register shifts compound, so a
 final pass folds any note outside the instrument's range back into it.
