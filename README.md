@@ -45,13 +45,15 @@ Anything you would ask a composer sitting next to you:
 - *"Compose a romantic piano piece in the style of Chopin"*
 - *"Write a short film score for a mysterious forest scene"*
 - *"A Bach fugue in D minor at 92 bpm"*
-- *"Make the middle section darker and slower"*
+- *"Make it darker and slower"* — writes the same piece again in that mood
 - *"Continue this piece in a more dramatic way"* — it reads your open score
 - *"Continue in the same style"* — matches the composer, key, tempo and
   instruments already on the page, exactly, not a guess
 - *"Continue this for a string quartet"* — carries the piece forward with
   different or larger forces, on request
 - *"Add a left hand accompaniment"* — keeps your melody, writes underneath it
+- *"Arrange this for string quartet"* — keeps your tune, scores it for the
+  instruments you name
 - *"Transpose it to F♯ minor"*
 - *"What key is this in?"*
 
