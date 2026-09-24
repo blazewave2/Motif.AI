@@ -377,6 +377,8 @@ def motif_score(m: Motif, style: MelodyStyle) -> float:
     durs = list(m.rhythm) + list(m.second)
     values = set(durs)
     s += 1.0 * min(len(values), 3)
+    if m.second and list(m.second) == list(m.rhythm):
+        s -= 1.0              # the idea's second bar answers its first, not echoes it
     if len(m.rhythm) > 6 and style.cells not in ("motoric", "galant"):
         s -= 1.5
     if len(m.rhythm) <= 1:
@@ -481,6 +483,7 @@ class PhrasePlan:
     tail_room: F = F(0)            # leave this much of the last bar for the next upbeat
     response_shift: int = 0        # how far the harmony moved the idea's repeat (0: free)
     imitate: bool = False          # the other hand answers the idea a bar later, below
+    imitate_drop: int = 12         # how far below: an octave, or a fifth (5) in a fugue
 
 
 @dataclass
@@ -922,14 +925,14 @@ class MelodyWriter:
                     c += 1.0 * abs(m - want)
         # -- counterpoint with the answering hand
         if sl.lower is not None and sl.lower < len(seq):
-            low = seq[sl.lower] - 12
+            low = seq[sl.lower] - plan.imitate_drop
             while low > m - 3:
                 low -= 12
             ic = (m - low) % 12
             if ic in (1, 2, 5, 6, 10, 11):
                 c += 2.2 if (strong or d >= F(1, 2)) else 0.6
             if i and slots[i - 1].lower is not None and prev is not None:
-                plow = seq[slots[i - 1].lower] - 12
+                plow = seq[slots[i - 1].lower] - plan.imitate_drop
                 while plow > prev - 3:
                     plow -= 12
                 if ic in (0, 7) and (prev - plow) % 12 == ic and m != prev:

@@ -38,6 +38,7 @@ class PhraseSpec:
     #: orchestra accompanying), orch_lead (the orchestra with the tune, the
     #: piano accompanying) or cadenza.
     forces: str = ""
+    register: str = ""           # "tenor": the tune moves to the left hand, under the harmony
 
 
 @dataclass
@@ -76,6 +77,11 @@ def plan_form(genre: str, prof: Profile, key: Key, target_bars: int,
     fn = _TEMPLATES.get(_genre_family(genre), _ternary)
     plan = fn(prof, key, max(8, target_bars), rng, character)
     plan.genre = genre or plan.genre
+    if "fugue" in genre or "fugato" in genre:
+        # a fugue answers its subject at the fifth, in the dominant
+        for p in plan.phrases:
+            if p.texture == "imitation":
+                p.texture = "fugato"
     _add_intro(plan, prof, target_bars, rng)
     return plan
 
@@ -204,13 +210,17 @@ def _ternary(prof: Profile, key: Key, bars: int, rng: random.Random, character: 
     # B: contrasting key, more motion, building to the climax
 
     n_b = max(1, b_bars // 8) if b_bars >= 8 else 1
+    # sometimes the middle section sings in the tenor, under repeated chords
+    tenor = rng.random() < prof.tenor and not short
     for i in range(n_b):
         last = i == n_b - 1
         phrases.append(_phr("B", "contrast", "continuation" if i else "sentence",
                             8 if b_bars >= 8 else b_bars, b_key,
                             "HC" if last else "PAC", 0.55 + 0.2 * i / n_b,
-                            _tex(prof, "contrast", rng, tx), new_section=(i == 0),
-                            words=words.get("contrast", "") if i == 0 else ""))
+                            "tenor" if tenor else _tex(prof, "contrast", rng, tx),
+                            new_section=(i == 0), register="tenor" if tenor else "",
+                            words=("sotto voce, cantando" if tenor else
+                                   words.get("contrast", "")) if i == 0 else ""))
     # retransition back to the tonic
     if not short:
         phrases.append(_phr("B", "transition", "development", 4, key, "HC", 0.85,

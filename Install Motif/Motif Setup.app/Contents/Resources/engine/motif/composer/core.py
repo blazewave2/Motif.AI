@@ -39,13 +39,14 @@ class Care:
     harmony_tries: int
     beam: int
     melody_takes: int
+    auditions: int = 1           # themes tried out in a real phrase before one is chosen
 
 
 CARE = {
-    "sketch": Care(8, 4, 6, 1),
-    "balanced": Care(16, 8, 10, 2),
-    "best": Care(32, 16, 16, 4),
-    "maximum": Care(64, 32, 24, 8),
+    "sketch": Care(8, 4, 6, 1, 1),
+    "balanced": Care(16, 8, 10, 2, 2),
+    "best": Care(32, 16, 16, 4, 3),
+    "maximum": Care(64, 32, 24, 8, 5),
 }
 
 _DYNAMICS = ["ppp", "pp", "p", "mp", "mf", "f", "ff", "fff"]
@@ -133,13 +134,21 @@ class Composer:
         form = plan_form(self.genre, prof, self.key, target, self.rng, plan.character)
         if self.simple:
             form = _simplify(form, prof)
+        if self.ensemble != "solo_piano":
+            # a tune in the pianist's left hand is a solo-piano idea
+            for p in form.phrases:
+                if p.register == "tenor" or p.texture == "tenor":
+                    p.register = ""
+                    p.texture = (prof.textures.get("contrast") or ["block"])[0]
         hstyle = harmony_style(prof.harmony)
         mstyle = melody_style(prof.melody)
 
         self._say("themes", "Inventing the themes" if self.theme is None else
                   "Listening to your theme", "", 0.06)
-        motif = self.theme.motif if self.theme is not None else \
-            invent_motif(mstyle, self.time, self.rng, self.care.motifs, plan.character)
+        if self.theme is not None:
+            motif = self.theme.motif
+        else:
+            motif = self._audition(form, hstyle, mstyle)
         contrast = invent_contrast(mstyle, motif, self.time, self.rng, self.care.motifs)
         writers = {
             "A": MelodyWriter(mstyle, motif, self.rng, beam=self.care.beam, time=self.time),
@@ -195,6 +204,45 @@ class Composer:
                                "character": plan.character, "ensemble": self.ensemble})
         self.msn = msn
         return score
+
+    def _audition(self, form: FormPlan, hstyle, mstyle) -> Motif:
+        """Several candidate themes, each written out as the piece's opening
+        phrase; the one whose phrase is best — by the search's own cost and
+        by a whole-phrase judgement — becomes the theme. A motif can look
+        fine on paper and make a dull phrase."""
+        first = next((p for p in form.phrases if p.role == "theme" and
+                      p.kind in ("sentence", "antecedent")), None)
+        candidates = [invent_motif(mstyle, self.time, self.rng, self.care.motifs,
+                                   self.plan.character)
+                      for _ in range(max(1, self.care.auditions))]
+        if first is None or len(candidates) == 1:
+            return candidates[0]
+        best, best_score = candidates[0], -1e18
+        for k, cand in enumerate(candidates):
+            self._say("themes", "Trying out themes", f"theme {k + 1} of {len(candidates)}",
+                      0.03 + 0.05 * k / len(candidates))
+            trial_rng = random.Random(self.rng.random())
+            saved = self.rng
+            self.rng = trial_rng
+            try:
+                writer = MelodyWriter(mstyle, cand, trial_rng, beam=max(6, self.care.beam // 2),
+                                      time=self.time)
+                w = self._phrase(first, F(0), hstyle, mstyle, writer, None, [], F(0), F(0),
+                                 final=False)
+            finally:
+                self.rng = saved
+            if not w.melody:
+                continue
+            roles = roles_for(first.kind, first.bars)
+            pp = PhrasePlan(start=F(0), bars=first.bars, bar_len=self.bar, time=self.time,
+                            key=first.key, harmony=w.harmony, cadence=first.cadence,
+                            bar_roles=roles)
+            score = judge_melody(w.melody, pp) - 0.12 * writer.last_cost + \
+                0.3 * motif_score(cand, mstyle)
+            if score > best_score:
+                best, best_score = cand, score
+        self.responses.clear()            # the trials' choices are not the piece's
+        return best
 
     def _summarise(self, written: list[Written], form: FormPlan, end: F, motif: Motif,
                    contrast: Motif) -> dict:
@@ -301,13 +349,17 @@ class Composer:
                                  idea_bar2=writer.motif.bar2 if roles and roles[0] == "idea"
                                  else "", response_shift=shift)
         harmony = plan_phrase(spec, hstyle, self.rng, tries=self.care.harmony_tries)
-        imitate = ps.texture == "imitation" and len(roles) > 1 and roles[1] == "idea2"
+        imitate = ps.texture in ("imitation", "fugato") and len(roles) > 1 and \
+            roles[1] == "idea2"
         if imitate:
-            harmony = _answer_harmony(harmony, t, self.bar)
+            harmony = _answer_harmony(harmony, t, self.bar,
+                                      steps=4 if ps.texture == "fugato" else 0)
         bass = _bass_line(harmony, self.prof.bass_low)
         low, high, top = mstyle.low, mstyle.high, mstyle.climax_high
         if self.ensemble in _arrange.LEAD_RANGE:
             low, high, top = _arrange.LEAD_RANGE[self.ensemble]
+        if ps.register == "tenor" and self.ensemble == "solo_piano":
+            low, high, top = 48, 64, 67
         peak = int(round(low + (high - low) * (0.5 + 0.45 * ps.energy)))
         if roles and roles[0] == "idea":
             # room above the idea and its repeat for the phrase to climb past them
@@ -331,7 +383,8 @@ class Composer:
                             start_near=last_note if not ps.new_section else None,
                             low=low, high=high, energy=ps.energy, bass=bass, final=final,
                             anacrusis=anacrusis, prev_harmony=prev_h, tail_room=tail,
-                            response_shift=shift, imitate=imitate)
+                            response_shift=shift, imitate=imitate,
+                            imitate_drop=5 if ps.texture == "fugato" else 12)
             mel = writer.write(pp)
             sc = judge_melody(mel, pp) - 0.12 * writer.last_cost
             if _DEBUG_TAKES:
@@ -417,6 +470,9 @@ class Composer:
         # -- key signatures and section breaks
         self._key_changes(sheet, written)
 
+        # -- the melody's own phrasing and articulation, before it is written down
+        for w in written:
+            self._shape_melody(w)
         # -- the right hand: the melody, doubled or filled out where the music swells
         for wi, w in enumerate(written):
             ps = w.spec
@@ -428,7 +484,8 @@ class Composer:
             elif ps.variation == "planing":
                 fill = "planing"
             prev_h = written[wi - 1].harmony[-1] if wi and written[wi - 1].harmony else None
-            _melody_to_voice(rh, w.melody, fill, w.harmony, w.start, prev_h)
+            _melody_to_voice(lh if ps.register == "tenor" else rh, w.melody, fill, w.harmony,
+                             w.start, prev_h)
         _group_tuplets(rh.notes)
         # the last melody note becomes a full chord
         _final_rh_chord(rh, written[-1], final_bar)
@@ -436,15 +493,27 @@ class Composer:
         for w in written:
             ps = w.spec
             if ps.role in ("theme", "return", "contrast") and ps.texture in _LH_ONLY and \
+                    ps.register != "tenor" and \
                     ps.variation != "octaves" and w.melody and \
                     self.rng.random() < prof.inner:
                 rh2.notes.extend(_inner_line(w, self.beat, final_bar))
 
         # -- the accompaniment, kept clear of the right hand
+        lh2 = Voice("LH2", secondary=True)
+        tenor_lines = Voice("tenor")
+        for w in written:
+            if w.spec.register == "tenor":
+                _melody_to_voice(tenor_lines, w.melody, "", w.harmony, w.start, None)
         ctx = TextureContext(self.time, self.bar, self.beat, self.key,
                              bass_low=prof.bass_low, rng=self.rng, tempo=float(self.tempo),
                              virtuoso=_virtuoso(prof))
         ctx.melody_floor, ctx.melody_top = _rh_extent(rh, self.bar, end)
+        if tenor_lines.notes:
+            t_low, t_top = _rh_extent(tenor_lines, self.bar, end)
+            for k, v in t_low.items():
+                ctx.melody_floor.setdefault(k, v)
+            for k, v in t_top.items():
+                ctx.melody_top.setdefault(k, v)
         for wi, w in enumerate(written):
             ps = w.spec
             ctx.key = ps.key
@@ -456,8 +525,16 @@ class Composer:
             if last:
                 h = harmony_at(w.harmony, final_bar)
                 tex += final_chord(h, final_bar, self.bar, ctx)
+            elif ps.cadence in ("PAC", "HC", "IAC", "plagal") and ps.texture in _FLOWING and \
+                    self.rng.random() < 0.45:
+                tex = _breathe(tex, w.harmony, span_end, self.bar, self.beat, ctx)
             w.texture = tex
-            _texture_to_voices(tex, w.harmony, lh, rh2)
+            if ps.register == "tenor":
+                # the right hand is free of the tune: its chords are the upper voice
+                _texture_to_voices([n for n in tex if n.staff == "RH"], w.harmony, rh, rh)
+                _texture_to_voices([n for n in tex if n.staff != "RH"], w.harmony, lh2, lh2)
+            else:
+                _texture_to_voices(tex, w.harmony, lh, rh2)
 
         # -- dynamics, words, phrasing and pedalling
         for wi, w in enumerate(written):
@@ -465,7 +542,7 @@ class Composer:
         self._tempo_changes(sheet, rh, written)
         _final_marks(rh, lh, rh2, end, self.bar)
         sheet.bar_info.setdefault(bars, BarInfo()).barline = "final"
-        sheet.voices = [rh, rh2, lh]
+        sheet.voices = [rh, rh2, lh] + ([lh2] if lh2.notes else [])
         return sheet
 
     def _ensemble_sheet(self, written: list[Written], end: F) -> Sheet:
@@ -475,6 +552,8 @@ class Composer:
                       time=self.time, tempo=self.tempo, tempo_text=self.tempo_text,
                       composer="Motif.AI", bars=bars)
         self._key_changes(sheet, written)
+        for w in written:
+            self._shape_melody(w)
         parts, voices = _arrange.arrange(self, written, end)
         sheet.parts = parts
         lead = voices[0]
@@ -482,8 +561,6 @@ class Composer:
             ps = w.spec
             if ps.words and w.melody:
                 lead.marks.append(Mark(w.melody[0].onset, "text", ps.words))
-            if w.melody and self.prof.harmony != "baroque":
-                _slur(w.melody, self.bar, self.beat)
         for v in voices:
             final = [n for n in v.notes if n.pitches]
             if final:
@@ -573,15 +650,47 @@ class Composer:
             if len(after) >= 2:
                 rh.marks.append(Mark(after[0].onset, "dim"))
                 rh.marks.append(Mark(after[-1].onset, "end"))
-        # slurs over each breath of the melody
-        if w.melody and prof.harmony != "baroque":
-            _slur(w.melody, self.bar, self.beat)
         # pedal with every change of harmony
         if prof.pedal == "harmony":
             for h in w.harmony:
                 lh.marks.append(Mark(h.onset, "ped"))
         elif prof.pedal == "sparse" and ps.role in ("closing", "climax"):
             lh.marks.append(Mark(w.harmony[0].onset, "ped"))
+
+
+    def _shape_melody(self, w: Written) -> None:
+        """Slurs over each breath of the melody, then its articulation."""
+        if w.melody and self.prof.harmony != "baroque":
+            _slur(w.melody, self.bar, self.beat,
+                  longest=2 if self.prof.harmony == "classical" else 4)
+        self._articulate(w)
+
+    def _articulate(self, w: Written) -> None:
+        """The Classical and Baroque touch: detached notes where the line
+        leaps or repeats at a quick tempo, a trill on the note before the
+        final tonic of a full close, and — for Beethoven — a sforzando to
+        drive a stormy passage."""
+        prof = self.prof
+        mel = sorted((n for n in w.melody if n.onset >= w.start), key=lambda n: n.onset)
+        if not mel:
+            return
+        classical = prof.harmony in ("classical", "baroque")
+        quick = float(self.tempo) * float(self.beat) >= 108
+        if classical and quick:
+            for a, b, c in zip(mel, mel[1:], mel[2:]):
+                if b.dur <= self.beat and not (b.slur_start or b.slur_stop) and \
+                        (abs(b.midi - a.midi) >= 3 or b.midi == a.midi) and \
+                        abs(c.midi - b.midi) >= 3 and "stacc" not in b.marks:
+                    b.marks = list(b.marks) + ["stacc"]
+        if classical and w.spec.cadence == "PAC" and len(mel) >= 2:
+            pen = mel[-2]
+            deg = (pen.midi - w.spec.key.tonic_pc) % 12
+            if pen.dur >= self.beat / 2 and deg in (2, 11) and "tr" not in pen.marks:
+                pen.marks = list(pen.marks) + ["tr"]
+        if prof.name == "beethoven" and w.spec.energy >= 0.7:
+            for n in mel:
+                if (n.onset - w.start) % (self.bar * 2) == 0 and n.dur >= self.beat:
+                    n.marks = list(n.marks) + ["accent"]
 
 
 # ---------------------------------------------------------------------------
@@ -716,9 +825,12 @@ def _simplify(form: FormPlan, prof: Profile) -> FormPlan:
     return form
 
 
-def _answer_harmony(harmony: list[Harmony], start: F, bar: F) -> list[Harmony]:
+def _answer_harmony(harmony: list[Harmony], start: F, bar: F, steps: int = 0
+                    ) -> list[Harmony]:
     """In an invention the answer in the second bar carries the subject's
-    own harmony: bar 1's chords, again."""
+    own harmony: bar 1's chords, again — or, when the answer is at the fifth
+    (a fugue), those chords moved to the dominant."""
+    from .harmony import transpose_roman
     first = [h for h in harmony if h.onset < start + bar]
     rest = [h for h in harmony if h.onset >= start + 2 * bar]
     if not first or not rest:
@@ -729,7 +841,11 @@ def _answer_harmony(harmony: list[Harmony], start: F, bar: F) -> list[Harmony]:
         out.append(Harmony(h.roman, h.key, h.onset, d, pedal=h.pedal))
     for h in first:
         d = min(h.end, start + bar) - h.onset
-        out.append(Harmony(h.roman, h.key, h.onset + bar, d, pedal=h.pedal))
+        roman = transpose_roman(h.roman, steps, h.key) if steps else h.roman
+        if steps and roman.startswith(("ii%", "iio")):
+            roman = "V"           # the answer's harmony is the dominant, not its neighbour
+        out.append(Harmony(roman, h.key, h.onset + bar, d,
+                           pedal=None if steps else h.pedal))
     return out + rest
 
 
@@ -855,6 +971,49 @@ _LH_ONLY = ("nocturne", "sweep", "sweep16", "bells", "waltz", "alberti", "repeat
             "sustained")
 
 
+#: Figurations that run on without a break — at a cadence they can stop to
+#: let the phrase breathe.
+_FLOWING = ("nocturne", "sweep", "sweep16", "alberti", "repeated")
+
+
+def _breathe(tex: list[TexNote], harmony: list[Harmony], end: F, bar: F, beat: F,
+             ctx: TextureContext) -> list[TexNote]:
+    """At a cadence the figuration comes to rest: the last half bar of the
+    phrase becomes its chord, held — the bass and the harmony above it — so
+    the end of the phrase is heard as an end."""
+    half = bar / 2 if bar >= 2 * beat else bar
+    beats = -(-half // beat)                  # whole beats, rounded up
+    cut = end - beat * beats
+    # never cut a triplet group in two: stop before any group that crosses
+    group_start = None
+    for n in sorted(tex, key=lambda x: x.onset):
+        if n.tuplet_start:
+            group_start = n.onset
+        if n.tuplet is not None and group_start is not None and n.onset < cut < n.onset + n.dur:
+            cut = group_start
+        if n.tuplet_stop:
+            if group_start is not None and group_start < cut < n.onset + n.dur:
+                cut = group_start
+            group_start = None
+    kept = [n for n in tex if n.onset < cut]
+    for n in kept:
+        if n.onset + n.dur > cut:
+            n.dur = cut - n.onset
+    h = harmony_at(harmony, cut)
+    lows = [m for n in tex if n.onset >= cut for m in n.midis]
+    if not lows:
+        return tex
+    b = min(lows)
+    top = min(b + 16, max(lows))
+    above = sorted({m for m in range(b + 3, top + 1) if m % 12 in h.pcs})
+    chord = [b] + [m for i, m in enumerate(above) if i < 2]
+    if chord[-1] - chord[0] > 16:
+        chord = [b]
+    kept.append(TexNote(cut, end - cut, chord, marks=["arp"] if chord[-1] - chord[0] > 10
+                        else []))
+    return kept
+
+
 def _inner_line(w: Written, beat: F, stop: F) -> list[Note]:
     """A second voice in the right hand, under the tune: one long note to a
     chord, moving by step where it can, sometimes held into the next chord
@@ -944,10 +1103,11 @@ def _energy_dynamic(prof: Profile, energy: float) -> str:
     return _DYNAMICS[idx]
 
 
-def _slur(melody: list[MelNote], bar: F, beat: F) -> None:
+def _slur(melody: list[MelNote], bar: F, beat: F, longest: int = 4) -> None:
     """Slurs follow the breathing of the line: a slur closes on a long note
-    that ends a bar, or before a wide leap, and never covers fewer than
-    three notes."""
+    that ends a bar, or before a wide leap, never covers fewer than three
+    notes, and never runs longer than ``longest`` bars (a Classical slur
+    spans a gesture, a Romantic one a whole line)."""
     notes = sorted(melody, key=lambda n: n.onset)
     group: list[MelNote] = []
     for i, n in enumerate(notes):
@@ -957,7 +1117,9 @@ def _slur(melody: list[MelNote], bar: F, beat: F) -> None:
         if nxt is not None:
             long_end = n.dur >= 2 * beat and (n.end % bar == 0 or n.dur >= bar / 2)
             leap = abs(nxt.midi - n.midi) >= 7
-            breath = (long_end or leap) and len(group) >= 3
+            too_long = nxt.onset - group[0].onset >= bar * longest and \
+                nxt.onset % bar == 0
+            breath = ((long_end or leap) and len(group) >= 3) or (too_long and len(group) >= 3)
         if breath:
             if len(group) >= 2:
                 group[0].slur_start = 1

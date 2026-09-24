@@ -31,7 +31,7 @@ from .prompt_parser import ENSEMBLE_WORDS, parse_prompt, parse_key
 from .prompt_parser import _detect as _detect_ensemble
 from . import voice as _voice
 
-INTENTS = ("create", "continue", "develop", "harmonize", "edit", "analyze")
+INTENTS = ("create", "continue", "develop", "harmonize", "arrange", "edit", "analyze")
 
 _CONTINUE_WORDS = ("continue", "carry on", "keep going", "keep writing",
                    "keep composing", "extend", "add more", "what comes next",
@@ -43,6 +43,28 @@ _CONTINUE_WORDS = ("continue", "carry on", "keep going", "keep writing",
                    "consistent with this", "keep it in the same")
 _DEVELOP_WORDS = ("develop", "vary", "variation", "elaborate", "expand on",
                   "build on", "take this", "rework", "reimagine")
+_ARRANGE_WORDS = ("arrange", "orchestrate", "score this for", "score it for", "rewrite this for",
+                  "rewrite it for", "transcribe this for", "transcribe it for", "set this for",
+                  "make this a string quartet", "turn this into a")
+#: Asking for a different mood rewrites the piece in it.
+_MOOD_EDITS: list[tuple[tuple[str, ...], dict]] = [
+    (("darker", "more dark", "gloomier", "more sinister"),
+     dict(character="dark", minor=True, tempo=0.92, words="darker")),
+    (("sadder", "more sad", "more melancholy", "more tragic", "more mournful"),
+     dict(character="sad", minor=True, tempo=0.85, words="sadder")),
+    (("brighter", "happier", "more cheerful", "more joyful", "more uplifting"),
+     dict(character="joyful", minor=False, tempo=1.08, words="brighter")),
+    (("more dramatic", "more passionate", "more intense", "more stormy", "more epic"),
+     dict(character="dramatic", tempo=1.05, words="more dramatic")),
+    (("calmer", "more peaceful", "gentler", "more tender", "more serene"),
+     dict(character="calm", tempo=0.88, words="calmer")),
+    (("more romantic", "more lyrical", "more singing"),
+     dict(character="romantic", words="more lyrical")),
+    (("more mysterious", "eerier", "more haunting"),
+     dict(character="mysterious", minor=True, tempo=0.9, words="more mysterious")),
+    (("more playful", "lighter", "more whimsical"),
+     dict(character="playful", minor=False, tempo=1.1, words="more playful")),
+]
 _HARMONIZE_WORDS = ("harmonize", "harmonise", "add accompaniment", "accompany",
                     "add chords", "add a left hand", "add bass", "add harmony")
 _EDIT_WORDS = ("transpose", "make it", "change the", "slower", "faster", "louder",
@@ -109,6 +131,8 @@ class MotifAgent:
             return "analyze" if has_score else "create"
         if not has_score:
             return "create"
+        if any(w in t for w in _ARRANGE_WORDS) and _ensemble_named_in(prompt):
+            return "arrange"
         if any(w in t for w in _HARMONIZE_WORDS):
             return "harmonize"
         if any(w in t for w in _CONTINUE_WORDS):
@@ -157,6 +181,7 @@ class MotifAgent:
             handler = {
                 "create": self._create, "continue": self._continue,
                 "develop": self._develop, "harmonize": self._harmonize,
+                "arrange": self._arrange,
                 "edit": self._edit, "analyze": self._analyze,
             }[intent]
             result = handler(req, existing, info)
@@ -331,9 +356,41 @@ class MotifAgent:
             musicxml=to_musicxml(merged), midi=to_midi(merged), plan=plan,
             preview=summarise(merged), analysis=analyse(merged).describe(), notes=notes)
 
+    def _arrange(self, req: Request, existing: Score, info: ScoreAnalysis) -> Result:
+        """The piece on the page, scored for other forces: its tune kept, its
+        harmony worked out beneath it, its parts written for the instruments."""
+        ensemble = req.ensemble or _ensemble_named_in(req.prompt) or "string_quartet"
+        from ..composer import arrange as arr
+        if not arr.supported(ensemble) or ensemble == "solo_piano":
+            return self._harmonize(req, existing, info)
+        from ..compose.styles import match_styles
+        named = match_styles(req.prompt.lower())
+        plan = self._plan_for(req)
+        style = resolve_style(req.style or (plan.style if named else info.detected_style))
+        from ..composer.harmonize import arrange_score
+        score, notes, _composer = arrange_score(
+            existing, ensemble, style.name, quality=self.options.get("quality", "best"),
+            progress=self.report, seed=plan.seed, title=existing.title)
+        forces = _voice._forces(ensemble)
+        bars = score.measure_count
+        lead = next((p for p in arr.ENSEMBLE_PARTS[ensemble] if p.role in ("lead", "organ",
+                                                                          "guitar", "keys")),
+                    arr.ENSEMBLE_PARTS[ensemble][0])
+        message = (f"**{existing.title or 'Your piece'}**, arranged for {forces}: {bars} bars. "
+                   f"The tune is kept as you wrote it and given to the {lead.name}; the "
+                   f"harmony is worked out beneath it and the inner parts are led smoothly "
+                   f"under the melody.")
+        plan.ensemble = ensemble
+        return Result(ok=True, message=message, musicxml=to_musicxml(score),
+                      midi=to_midi(score), plan=plan, preview=summarise(score),
+                      analysis=analyse(score).describe(), notes=notes)
+
     def _edit(self, req: Request, existing: Score, info: ScoreAnalysis) -> Result:
         """Direct transformations of the score that is already there."""
         t = req.prompt.lower()
+        mood = next((spec for words, spec in _MOOD_EDITS if any(w in t for w in words)), None)
+        if mood is not None:
+            return self._revise(req, existing, info, mood)
         score = existing
         applied: list[str] = []
 
@@ -386,6 +443,55 @@ class MotifAgent:
         return Result(ok=True, message="Applied: " + ", ".join(applied) + ".",
                       musicxml=to_musicxml(score), midi=to_midi(score),
                       preview=summarise(score), analysis=analyse(score).describe())
+
+    def _revise(self, req: Request, existing: Score, info: ScoreAnalysis, mood: dict) -> Result:
+        """The same piece written again in another mood: its composer, form,
+        length, metre, forces and seed kept, its key turned to the parallel
+        minor or major when the mood asks, its tempo eased or quickened."""
+        t = req.prompt.lower()
+        meta = existing.metadata or {}
+        plan = self._plan_for(req)
+        plan.style = info.detected_style
+        genre = meta.get("form") or None
+        key = info.key
+        if mood.get("minor") is True and not key.is_minor:
+            key = Key(key.tonic, "minor")
+        elif mood.get("minor") is False and key.is_minor:
+            key = Key(key.tonic, "major")
+        plan.key = str(key)
+        plan.time = info.time
+        plan.time_given = True
+        factor = mood.get("tempo", 1.0)
+        if any(w in t for w in ("slower", "slow it")):
+            factor *= 0.85
+        elif any(w in t for w in ("faster", "quicker")):
+            factor *= 1.15
+        plan.tempo = int(max(36, min(200, round(info.tempo * factor))))
+        plan.tempo_given = True
+        plan.tempo_text = ""
+        plan.length_bars = max(8, info.bars)
+        plan.character = mood["character"]
+        ensemble = meta.get("ensemble") or info.ensemble
+        if ensemble:
+            plan.ensemble = ensemble
+        try:
+            plan.seed = int(meta.get("seed") or plan.seed)
+        except (TypeError, ValueError):
+            pass
+        plan.title = existing.title or plan.title
+        if " in " in plan.title and str(key) != str(info.key):
+            head, old = plan.title.rsplit(" in ", 1)
+            plain = old.replace("♭", "b").replace("♯", "#").strip()
+            if plain.lower() == str(info.key).lower():
+                plan.title = f"{head} in {key}"
+        plan.prompt = meta.get("prompt") or plan.prompt
+        described = mood["words"]
+
+        def message(p: CompositionPlan, summary: dict) -> str:
+            change = f", now in {p.key}" if str(key) != str(info.key) else ""
+            return (f"Here is **{p.title}** again, {described}{change} — the same composer, "
+                    f"form and length, written anew around the mood you asked for.")
+        return self._finish(plan, message, form=genre)
 
     def _analyze(self, req: Request, existing: Score, info: ScoreAnalysis) -> Result:
         chords = " | ".join(info.chord_summary[:16]) or "—"

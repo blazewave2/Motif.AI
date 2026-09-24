@@ -226,3 +226,60 @@ def harmonize_score(existing: Score, style_name: str, *, quality: str = "best",
     notes = [f"Harmony chosen for your tune: {progression}{' …' if len(harmonies) > 12 else ''}",
              f"Accompaniment: {texture.replace('_', ' ')} in the manner of {prof.display}."]
     return score, notes
+
+
+def arrange_score(existing: Score, ensemble: str, style_name: str, *, quality: str = "best",
+                  progress=None, seed: int = 0, title: str = ""):
+    """The tune of ``existing`` scored for ``ensemble``: its harmony worked
+    out under it as when harmonising, then handed to the instruments by the
+    composer's arranger — the tune to the lead, inner voices led beneath it,
+    the bass its own line. Returns (score, notes, composer)."""
+    from ..plan import CompositionPlan
+    from .core import Composer, Written
+    from .form import PhraseSpec
+    from .melody import MelNote
+    report(progress, Progress("planning", "Listening to your piece", "", 0.05))
+    key = existing.key or Key("C", "major")
+    time = tuple(existing.time)
+    bars = max(1, existing.measure_count)
+    prof = profile(style_name)
+    style = harmony_style(prof.harmony)
+    line = _top_line(existing)
+    width = {"sketch": 8, "balanced": 12, "best": 20, "maximum": 32}.get(quality, 20)
+    report(progress, Progress("writing", "Working out the harmony", "", 0.3))
+    harmonies = choose_chords(line, key, time, bars, style, width=width)
+    plan = CompositionPlan(title=title or existing.title or "Untitled", key=str(key),
+                           time=time, tempo=int(existing.tempo or 90), tempo_given=True,
+                           time_given=True, style=prof.name, ensemble=ensemble, seed=seed,
+                           prompt="")
+    composer = Composer(plan, quality=quality, progress=progress, seed=seed)
+    composer.tempo_text = ""
+    bar = bar_length(time)
+    texture = (prof.textures.get("theme") or ["block"])[0]
+    written = []
+    phrase_bars = 4
+    for start_bar in range(0, bars, phrase_bars):
+        n = min(phrase_bars, bars - start_bar)
+        t0, t1 = bar * start_bar, bar * (start_bar + n)
+        hs = [h for h in harmonies if t0 <= h.onset < t1]
+        if not hs:
+            continue
+        mel = []
+        for on, d, midi, _b in line:
+            if t0 <= on < t1:
+                h = harmony_at(harmonies, on)
+                mel.append(MelNote(on, d, midi, spell(midi, h)))
+        last = start_bar + n >= bars
+        spec = PhraseSpec("A", "theme", "sentence", n, key, "PAC" if last else "HC",
+                          0.5, texture, new_section=start_bar == 0)
+        written.append(Written(spec, t0, hs, mel, []))
+    report(progress, Progress("writing", "Scoring it for the instruments", "", 0.7))
+    sheet = composer._ensemble_sheet(written, bar * bars) if ensemble != "solo_piano" else None
+    if sheet is None:
+        raise ValueError("arranging for solo piano is harmonising")
+    msn = sheet.to_msn()
+    score, _issues = to_score(parse_msn(msn))
+    report(progress, Progress("finishing", "Engraving the score", "", 0.95))
+    notes = [f"Harmony under your tune: {' '.join(h.roman for h in harmonies[:12])}"
+             f"{' …' if len(harmonies) > 12 else ''}"]
+    return score, notes, composer

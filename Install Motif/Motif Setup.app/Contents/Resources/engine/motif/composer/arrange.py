@@ -306,13 +306,19 @@ def _line(composer, written, chords, p: PartDef, phrase_at, bar: F, beat: F) -> 
             if not play:
                 continue
             shift = 12 if p.role == "lead8" else 0
-            for n in w.melody:
+            mel = sorted(w.melody, key=lambda n: n.onset)
+            for k, n in enumerate(mel):
                 m = _fit(n.midi + shift, p.low, p.high)
                 if m is None:
                     continue
                 h = harmony_at(w.harmony, n.onset)
                 pitch = n.pitch if (m == n.midi and n.pitch is not None) else spell(m, h)
-                v.add(Note(n.onset, n.dur, [pitch], marks=list(n.marks),
+                marks = [x for x in n.marks if x != "tr" or p.instrument != "voice"]
+                # a singer breathes where the phrase ends
+                if p.instrument == "voice" and n.slur_stop and k < len(mel) - 1 and \
+                        "breath" not in marks:
+                    marks.append("breath")
+                v.add(Note(n.onset, n.dur, [pitch], marks=marks,
                            slur_start=n.slur_start, slur_stop=n.slur_stop))
             continue
         motion = forced_motion or _motion(w, composer.prof.harmony)
@@ -337,6 +343,19 @@ def _line(composer, written, chords, p: PartDef, phrase_at, bar: F, beat: F) -> 
                     continue
                 m = _fit(m, p.low, p.high)
                 if m is None:
+                    continue
+                if p.role == "tenor" and motion == "hold" and \
+                        w.spec.texture in ("nocturne", "sweep", "sweep16") and c.dur >= beat:
+                    # the piano's flowing left hand, given to the viola as broken chords
+                    tones = [x for x in range(m, min(p.high, m + 12) + 1) if x % 12 in h.pcs]
+                    wave = (tones[:3] + tones[1:2]) if len(tones) >= 3 else [m]
+                    t, k = c.onset, 0
+                    step = beat / 2 if beat == 1 else beat / 3
+                    while t < c.onset + c.dur:
+                        d = min(step, c.onset + c.dur - t)
+                        v.add(Note(t, d, [spell(wave[k % len(wave)], h)]))
+                        t += step
+                        k += 1
                     continue
                 for on, d in _pulse(c.onset, c.dur, beat, motion):
                     v.add(Note(on, d, [spell(m, h)]))
