@@ -133,6 +133,12 @@ class Composer:
         form = plan_form(self.genre, prof, self.key, target, self.rng, plan.character)
         if self.simple:
             form = _simplify(form, prof)
+        if self.ensemble != "solo_piano":
+            # a tune in the pianist's left hand is a solo-piano idea
+            for p in form.phrases:
+                if p.register == "tenor" or p.texture == "tenor":
+                    p.register = ""
+                    p.texture = (prof.textures.get("contrast") or ["block"])[0]
         hstyle = harmony_style(prof.harmony)
         mstyle = melody_style(prof.melody)
 
