@@ -159,9 +159,13 @@ def composed_message(plan: CompositionPlan, summary: dict,
             story.append(f"It opens with {_bars(a, b)} of accompaniment alone — {tex}.")
         elif role == "theme":
             up = " that leans in from an upbeat" if th.get("upbeat") else ""
+            answer = {1: "answered a step higher", -1: "answered a step lower",
+                       2: "answered a third higher", -2: "answered a third lower",
+                       3: "answered a fourth higher", 4: "answered on the dominant",
+                       -3: "answered on the dominant", 0: "restated over new harmony"
+                       }.get(th.get("answer"), "developed")
             story.append(f"The theme ({_bars(a, b)}) is a {shape_word} idea{up}, stated, "
-                         f"answered a step away and then broken down towards its cadence, "
-                         f"over {tex}.")
+                         f"{answer}, then broken down towards its cadence, over {tex}.")
         elif role == "contrast":
             words = f", {sec['words']}," if sec.get("words") else ""
             story.append(f"The middle section{words} moves to {sec['key']} ({_bars(a, b)}) "

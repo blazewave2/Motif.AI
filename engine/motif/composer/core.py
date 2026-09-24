@@ -97,6 +97,7 @@ class Composer:
         self.notes: list[str] = []
         self.msn = ""
         self.summary: dict = {}
+        self.responses: dict[str, int] = {}      # how each theme's repeat was answered
         ens = getattr(plan, "ensemble", None) or "solo_piano"
         self.ensemble = ens if (ens == "solo_piano" or _arrange.supported(ens)) else "solo_piano"
         if getattr(plan, "tempo_given", False):
@@ -217,7 +218,9 @@ class Composer:
                 "style": self.prof.display, "composer": self.prof.name,
                 "sections": sections,
                 "theme": {"notes": len(motif.rhythm) + len(motif.second),
-                          "shape": sum(motif.steps), "upbeat": bool(motif.anacrusis)},
+                          "shape": sum(motif.steps), "upbeat": bool(motif.anacrusis),
+                          "answer": self.responses.get("theme"),
+                          "own": self.theme is not None},
                 "contrast": {"notes": len(contrast.rhythm) + len(contrast.second),
                              "shape": sum(contrast.steps)}}
 
@@ -264,6 +267,7 @@ class Composer:
         if presentation:
             opts = _RESPONSES.get(self.prof.harmony, _RESPONSES["romantic"])
             shift = self.rng.choices([o for o, _ in opts], [w for _, w in opts])[0]
+            self.responses.setdefault(ps.role, shift)
         prefix, prefix_bars = [], 0
         if ps.kind == "consequent":
             ante = _antecedent_of(ps, written)
@@ -275,6 +279,9 @@ class Composer:
         spec = PhraseHarmonySpec(key=ps.key, start=t, bars=ps.bars, bar_len=self.bar,
                                  cadence=ps.cadence, kind=hkind, beat=self.beat,
                                  pedal=(ps.role == "closing" and prof_pedal(self.prof)),
+                                 pedal_pc=((ps.key.tonic_pc + 7) % 12
+                                           if ps.role == "transition" and ps.cadence == "HC"
+                                           and prof_pedal(self.prof) else None),
                                  presentation=presentation, prefix=prefix,
                                  prefix_bars=prefix_bars,
                                  idea_bar2=writer.motif.bar2 if roles and roles[0] == "idea"
@@ -345,8 +352,9 @@ class Composer:
             # the return closes where the original only paused
             last = harmony[-1]
             tonic = "I" if not ps.key.is_minor else "i"
-            if ps.cadence in ("PAC", "plagal"):
-                harmony[-1] = Harmony(tonic, ps.key, last.onset, last.dur, cadence=ps.cadence)
+            if ps.cadence in ("PAC", "plagal", "DC"):
+                arrival = tonic if ps.cadence != "DC" else ("VI" if ps.key.is_minor else "vi")
+                harmony[-1] = Harmony(arrival, ps.key, last.onset, last.dur, cadence=ps.cadence)
                 if len(harmony) >= 2 and harmony[-2].function != "D":
                     h2 = harmony[-2]
                     harmony[-2] = Harmony("V7", ps.key, h2.onset, h2.dur)
@@ -354,7 +362,7 @@ class Composer:
         for m in src.melody:
             melody.append(MelNote(m.onset + shift, m.dur, m.midi + semis, None, m.role,
                                   list(m.marks)))
-        if ps.cadence in ("PAC", "plagal") and melody:
+        if ps.cadence in ("PAC", "plagal", "DC") and melody:
             tonic_pc = ps.key.tonic_pc
             last = melody[-1]
             if last.midi % 12 != tonic_pc:
@@ -408,6 +416,13 @@ class Composer:
         _group_tuplets(rh.notes)
         # the last melody note becomes a full chord
         _final_rh_chord(rh, written[-1], final_bar)
+        # a singing inner voice under the tune, where the left hand leaves room
+        for w in written:
+            ps = w.spec
+            if ps.role in ("theme", "return", "contrast") and ps.texture in _LH_ONLY and \
+                    ps.variation != "octaves" and w.melody and \
+                    self.rng.random() < prof.inner:
+                rh2.notes.extend(_inner_line(w, self.beat, final_bar))
 
         # -- the accompaniment, kept clear of the right hand
         ctx = TextureContext(self.time, self.bar, self.beat, self.key,
@@ -517,7 +532,7 @@ class Composer:
         ps = w.spec
         at = w.melody[0].onset if w.melody else w.start
         dyn = _energy_dynamic(prof, ps.energy)
-        if ps.role == "closing":
+        if ps.role == "closing" and ps.section == "coda":
             dyn = prof.dynamics[0]
         if first or ps.new_section or dyn != self._last_dyn:
             (rh if w.melody else lh).marks.append(Mark(at, "dyn", dyn))
@@ -525,8 +540,12 @@ class Composer:
         if ps.words and ps.words.lower() != (self.tempo_text or "").lower():
             rh.marks.append(Mark(at, "text", ps.words))
         mel = [n for n in w.melody if n.onset >= w.start]
+        if ps.role == "transition" and len(mel) >= 2:
+            # the passage leading home grows all the way into what comes next
+            rh.marks.append(Mark(mel[0].onset, "cresc"))
+            rh.marks.append(Mark(mel[-1].onset, "end"))
         # a swell into the phrase's high point and away from it, over a bar or two
-        if len(mel) > 4 and ps.role not in ("closing", "intro"):
+        elif len(mel) > 4 and ps.role not in ("closing", "intro"):
             peak = max(mel, key=lambda n: (n.midi, -n.onset))
             rise = [n for n in mel
                     if peak.onset - self.bar * 2 <= n.onset < peak.onset - self.beat]
@@ -788,6 +807,63 @@ def _melody_to_voice(rh: Voice, melody: list[MelNote], fill: str, harmony: list[
                              key=lambda x: x.midi)
         rh.add(Note(m.onset, m.dur, pitches, tie=m.tie, marks=list(m.marks),
                     graces=list(m.graces), slur_start=m.slur_start, slur_stop=m.slur_stop))
+
+
+#: Textures that keep entirely to the left hand, leaving the right hand's
+#: second voice free.
+_LH_ONLY = ("nocturne", "sweep", "sweep16", "bells", "waltz", "alberti", "repeated", "walking",
+            "sustained")
+
+
+def _inner_line(w: Written, beat: F, stop: F) -> list[Note]:
+    """A second voice in the right hand, under the tune: one long note to a
+    chord, moving by step where it can, sometimes held into the next chord
+    as a suspension that falls to its resolution — always below the melody
+    and within the hand's reach of it."""
+    mel = sorted((n for n in w.melody if n.onset >= w.start), key=lambda n: n.onset)
+    out: list[Note] = []
+    prev: int | None = None
+    hs = [h for h in w.harmony if h.onset < stop]
+    for k, h in enumerate(hs):
+        end = min(h.end, stop)
+        over = [n.midi for n in mel if n.onset < end and n.end > h.onset]
+        if not over:
+            prev = None
+            continue
+        lo, hi = max(over) - 10, min(over) - 3
+        cands = [m for m in range(lo, hi + 1) if m % 12 in h.pcs and m >= 55]
+        if not cands:
+            prev = None
+            continue
+        target = prev if prev is not None else (lo + hi) // 2
+        m = min(cands, key=lambda x: (abs(x - target) if prev is None else
+                                      (0 if x == prev else abs(x - prev) + (0 if abs(x - prev) <= 2
+                                                                           else 3)), x))
+        dur = end - h.onset
+        nxt = hs[k + 1] if k + 1 < len(hs) else None
+        # a suspension: held over the change and falling a step to a chord tone
+        if nxt is not None and m % 12 not in nxt.pcs and dur >= 2 * beat and nxt.end - nxt.onset >= 2 * beat:
+            res = [x for x in (m - 1, m - 2) if x % 12 in nxt.pcs]
+            nxt_over = [n.midi for n in mel if n.onset < nxt.onset + beat and n.end > nxt.onset]
+            if res and nxt_over and max(nxt_over) - res[0] <= 10 and min(nxt_over) - m >= 3:
+                out.append(Note(h.onset, dur, [spell(m, h)], tie=True))
+                out.append(Note(nxt.onset, beat, [spell(m, h)]))
+                out.append(Note(nxt.onset + beat, nxt.end - nxt.onset - beat,
+                                [spell(res[0], nxt)]))
+                prev = res[0]
+                hs[k + 1] = None if False else nxt
+                continue
+        if out and out[-1].onset + out[-1].dur > h.onset:
+            continue                      # this chord's start is covered by a suspension
+        out.append(Note(h.onset, dur, [spell(m, h)]))
+        prev = m
+    # drop anything overlapping (a suspension already covered it)
+    clean: list[Note] = []
+    for n in sorted(out, key=lambda x: x.onset):
+        if clean and n.onset < clean[-1].onset + clean[-1].dur:
+            continue
+        clean.append(n)
+    return clean
 
 
 def _final_rh_chord(rh: Voice, last: Written, final_bar: F) -> None:

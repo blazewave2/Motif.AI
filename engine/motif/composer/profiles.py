@@ -33,6 +33,7 @@ class Profile:
     genres: tuple[str, ...] = ()
     words: dict[str, str] = field(default_factory=dict)   # expressive words for sections
     intro: float = 0.3                 # chance the accompaniment starts alone for a bar or two
+    inner: float = 0.0                 # chance a lyrical phrase gains a singing inner voice
     language: str = "it"               # tempo words: it | fr | de
     lean: str = "lyrical"              # the character a request without one gets
 
@@ -97,12 +98,12 @@ _add(Profile("schubert", "Schubert", "romantic", "romantic",
               "climax": ["block"], "return": ["repeated"], "closing": ["block"]},
              pedal="harmony", rubato=0.12, phrase="period",
              genres=("impromptu", "moment musical", "lied"),
-             intro=0.6))
+             intro=0.6, inner=0.3))
 _add(Profile("mendelssohn", "Mendelssohn", "romantic", "romantic",
              {"theme": ["nocturne", "repeated"], "contrast": ["sweep16"],
               "climax": ["block"], "return": ["nocturne"], "closing": ["block"]},
              pedal="harmony", rubato=0.12, genres=("song without words",),
-             intro=0.5))
+             intro=0.5, inner=0.3))
 _add(Profile("chopin", "Chopin", "romantic", "romantic",
              {"theme": ["nocturne"], "contrast": ["block", "sweep"], "climax": ["sweep", "block"],
               "return": ["nocturne"], "closing": ["nocturne", "block"]},
@@ -110,12 +111,12 @@ _add(Profile("chopin", "Chopin", "romantic", "romantic",
              ornaments=0.35, phrase="period",
              genres=("nocturne", "prelude", "waltz", "mazurka", "etude", "ballade", "polonaise"),
              words={"theme": "dolce", "contrast": "agitato", "return": "con anima"},
-             intro=0.5))
+             intro=0.5, inner=0.45))
 _add(Profile("schumann", "Schumann", "romantic", "romantic",
              {"theme": ["repeated", "nocturne"], "contrast": ["repeated"], "climax": ["block"],
               "return": ["nocturne"], "closing": ["block"]},
              pedal="harmony", rubato=0.15,
-             intro=0.3, language="de"))
+             intro=0.3, language="de", inner=0.35))
 _add(Profile("liszt", "Liszt", "romantic", "russian",
              {"theme": ["sweep", "nocturne"], "contrast": ["sweep16", "bells"],
               "climax": ["bells", "sweep16"], "return": ["sweep"], "closing": ["block"]},
@@ -123,23 +124,23 @@ _add(Profile("liszt", "Liszt", "romantic", "russian",
              ornaments=0.2, octave_climax=True, bass_low=26,
              genres=("etude", "consolation", "liebestraum", "rhapsody", "ballade"),
              words={"theme": "espressivo", "contrast": "agitato", "climax": "appassionato"},
-             intro=0.5))
+             intro=0.5, inner=0.3))
 _add(Profile("brahms", "Brahms", "romantic", "romantic",
              {"theme": ["nocturne", "repeated"], "contrast": ["block", "repeated"],
               "climax": ["block"], "return": ["nocturne"], "closing": ["block"]},
              pedal="harmony", rubato=0.12, genres=("intermezzo", "rhapsody", "waltz"),
-             intro=0.3))
+             intro=0.3, inner=0.4))
 _add(Profile("grieg", "Grieg", "romantic", "romantic",
              {"theme": ["nocturne", "block"], "contrast": ["repeated"], "climax": ["block"],
               "return": ["nocturne"], "closing": ["block"]},
              pedal="harmony", rubato=0.15, genres=("lyric piece",),
-             intro=0.4))
+             intro=0.4, inner=0.3))
 _add(Profile("tchaikovsky", "Tchaikovsky", "russian", "romantic",
              {"theme": ["nocturne", "block"], "contrast": ["repeated", "sweep"],
               "climax": ["block", "bells"], "return": ["nocturne"], "closing": ["block"]},
              pedal="harmony", dynamics=("p", "f"), climax_dynamic="ff", rubato=0.18,
              genres=("romance", "barcarolle", "waltz", "elegy"),
-             intro=0.5))
+             intro=0.5, inner=0.4))
 _add(Profile("rachmaninoff", "Rachmaninoff", "russian", "russian",
              {"theme": ["sweep", "nocturne", "bells"], "contrast": ["sweep", "sweep16"],
               "climax": ["bells", "block"], "return": ["bells", "sweep"],
@@ -150,13 +151,13 @@ _add(Profile("rachmaninoff", "Rachmaninoff", "russian", "russian",
              genres=("prelude", "etude-tableau", "elegie", "romance", "moment musical"),
              words={"theme": "cantabile", "contrast": "agitato",
                     "climax": "con passione", "return": "maestoso"},
-             intro=0.75, lean="slow"))
+             intro=0.75, lean="slow", inner=0.5))
 _add(Profile("scriabin", "Scriabin", "russian", "russian",
              {"theme": ["sweep", "nocturne"], "contrast": ["sweep16"], "climax": ["bells"],
               "return": ["sweep"], "closing": ["sustained"]},
              pedal="harmony", dynamics=("pp", "f"), climax_dynamic="ff", rubato=0.25,
              octave_climax=True,
-             intro=0.3))
+             intro=0.3, inner=0.3))
 _add(Profile("debussy", "Debussy", "impressionist", "impressionist",
              {"theme": ["sustained", "nocturne"], "contrast": ["sweep"], "climax": ["block"],
               "return": ["sustained"], "closing": ["sustained"]},
@@ -194,7 +195,7 @@ _add(Profile("romantic", "Romantic", "romantic", "romantic",
              {"theme": ["nocturne"], "contrast": ["repeated"], "climax": ["block"],
               "return": ["nocturne"], "closing": ["block"]},
              pedal="harmony", rubato=0.15,
-             intro=0.4))
+             intro=0.4, inner=0.3))
 
 #: Composers without a profile of their own, and whose music theirs is like.
 KIN = {

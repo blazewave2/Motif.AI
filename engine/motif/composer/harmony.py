@@ -435,6 +435,9 @@ class PhraseHarmonySpec:
     #: What the theme's second bar implies (T, S or D), so its opening two
     #: bars are harmonised the way the tune suggests.
     idea_bar2: str = ""
+    #: Hold this pitch class in the bass under the whole phrase (a dominant
+    #: pedal building towards a return), rather than the tonic at its start.
+    pedal_pc: int | None = None
     #: A sentence whose idea is repeated a number of scale steps away has its
     #: opening chords moved the same distance (a true sequence); 0 means the
     #: repeat is reharmonised from the style's own answers instead.
@@ -646,7 +649,8 @@ def _candidate(spec: PhraseHarmonySpec, style: HarmonyStyle, rng: random.Random
 
     out = [Harmony(roman, key, onset, dur)
            for (stage, onset, dur), roman in zip(slots, labels)]
-    if spec.pedal or (spec.kind == "open" and rng.random() < style.pedal):
+    if spec.pedal or spec.pedal_pc is not None or \
+            (spec.kind == "open" and rng.random() < style.pedal):
         _pedal(out, key, spec)
     if spec.cadence != "none" and out and has_arrival:
         out[-1].cadence = spec.cadence
@@ -770,7 +774,12 @@ def _sequence(n: int, mode: str, rng: random.Random) -> list[str]:
 
 
 def _pedal(harmonies: list[Harmony], key: Key, spec: PhraseHarmonySpec) -> None:
-    """Hold the tonic in the bass under the opening chords."""
+    """Hold the tonic in the bass under the opening chords — or, for a
+    passage leading home, the dominant under all of it."""
+    if spec.pedal_pc is not None:
+        for h in harmonies:
+            h.pedal = spec.pedal_pc
+        return
     tonic_pc = key.tonic_pc
     limit = spec.start + spec.bar_len * max(2, spec.bars // 2)
     for h in harmonies:

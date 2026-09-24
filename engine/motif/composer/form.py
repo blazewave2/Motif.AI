@@ -224,6 +224,15 @@ def _ternary(prof: Profile, key: Key, bars: int, rng: random.Random, character: 
                             recall=src, variation="octaves" if grand else "ornament",
                             new_section=(j == 0),
                             words=words.get("climax" if grand else "return", "")))
+    # the return's cadence is sometimes evaded — a deceptive cadence — and the
+    # music has to find its way home again before the coda
+    last = phrases[-1]
+    if not short and last.section == "A'" and prof.harmony in ("russian", "romantic") and \
+            rng.random() < 0.5:
+        last.cadence = "DC"
+        phrases.append(_phr("A'", "closing", "closing", 4, key, "PAC",
+                            max(0.6, last.energy - 0.1), last.texture,
+                            variation=last.variation))
     phrases.append(_phr("coda", "closing", "closing", coda, key, "plagal" if
                         prof.harmony in ("russian", "romantic") else "PAC", 0.25,
                         _tex(prof, "closing", rng, tx), new_section=True))

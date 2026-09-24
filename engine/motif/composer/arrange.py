@@ -322,7 +322,7 @@ def _dynamics_for(v: Voice, written, composer) -> None:
             last = None
             continue
         dyn = _energy_dynamic(composer.prof, w.spec.energy)
-        if w.spec.role == "closing":
+        if w.spec.role == "closing" and w.spec.section == "coda":
             dyn = composer.prof.dynamics[0]
         if dyn != last:
             v.marks.append(Mark(notes[0].onset, "dyn", dyn))
