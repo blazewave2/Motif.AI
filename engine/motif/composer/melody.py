@@ -1003,23 +1003,32 @@ def _shift_cost(shift: int, role: str, before_peak: bool, same_chord: bool) -> f
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
+def _crooked(t: F) -> bool:
+    """Whether a point in the bar falls inside a triplet (or other tuplet)."""
+    d = t.denominator
+    return d & (d - 1) != 0
+
+
 def _first_half(rhythm: list[F], bar: F) -> list[F]:
+    """The first half of a bar's rhythm, for fragmenting an idea — cut only
+    where no triplet is broken."""
     half, acc, out = bar / 2, F(0), []
     for v in rhythm:
         if acc + v > half:
-            out.append(half - acc)
-            acc = half
             break
         out.append(v)
         acc += v
         if acc == half:
             break
+    while out and _crooked(acc):
+        acc -= out.pop()
     if acc < half:
         out.append(half - acc)
     return [v for v in out if v > 0]
 
 
 def _fit_rhythm(r: list[F], bar: F) -> list[F]:
+    """A rhythm cut or stretched to fill ``bar`` without breaking a triplet."""
     total = sum(r)
     if total == 0:
         return [bar]
@@ -1027,11 +1036,15 @@ def _fit_rhythm(r: list[F], bar: F) -> list[F]:
         out, acc = [], F(0)
         for v in r:
             if acc + v >= bar:
-                out.append(bar - acc)
                 break
             out.append(v)
             acc += v
+        while out and _crooked(acc):
+            acc -= out.pop()
+        out.append(bar - acc)
         return [v for v in out if v > 0]
+    if _crooked(r[-1]):
+        return r + [bar - total]
     return r[:-1] + [r[-1] + (bar - total)]
 
 

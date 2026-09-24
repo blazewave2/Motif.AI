@@ -269,8 +269,20 @@ def parse_prompt(prompt: str, *, seed: int | None = None,
     # -- ensemble & form ---------------------------------------------------
     ensemble = _detect(text, ENSEMBLE_WORDS) or "solo_piano"
     form = _detect(text, FORM_WORDS)
+    if form == "concerto" and ensemble == "solo_piano" \
+            and not any(w in text for w in ENSEMBLE_WORDS["solo_piano"]):
+        # "a Rachmaninoff concerto" is a piano concerto
+        ensemble = "piano_concerto"
     if form is None:
-        form = "concerto" if ensemble == "piano_concerto" else rng.choice(list(style.forms))
+        if ensemble == "piano_concerto":
+            form = "concerto"
+        else:
+            # a piece nobody asked to be a concerto is not one; études and
+            # mazurkas belong to the piano
+            pool = [f for f in style.forms if f != "concerto"]
+            if ensemble not in ("solo_piano", "harpsichord", "organ"):
+                pool = [f for f in pool if f not in ("etude", "etude_tableau", "mazurka")]
+            form = rng.choice(pool or ["ternary"])
     if form not in FORMS:
         form = "ternary"
     if ensemble == "piano_concerto" and form not in ("concerto", "sonata", "rondo"):

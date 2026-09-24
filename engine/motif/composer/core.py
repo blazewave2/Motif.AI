@@ -88,6 +88,9 @@ class Composer:
         self.prof: Profile = profile(plan.style)
         self.key = Key.parse(plan.key)
         self.genre = form or detect_genre(plan.prompt) or plan.form
+        if genre_family(self.genre) == "concerto" and \
+                (getattr(plan, "ensemble", None) or "solo_piano") != "piano_concerto":
+            self.genre = "ternary"             # only a piano concerto is written as one
         self.family = genre_family(self.genre)
         _retitle(plan, self.genre, named=bool(detect_genre(plan.prompt)) and not form)
         if getattr(plan, "time_given", False) or not plan.prompt:
@@ -278,7 +281,9 @@ class Composer:
         """How long the upbeat into phrase ``ps`` will be (0 if none)."""
         if ps.recall is not None and ps.recall < len(written):
             return written[ps.recall].upbeat
-        if ps.kind == "intro":
+        if ps.kind == "intro" or ps.register == "tenor":
+            # a tune in the left hand starts on its downbeat: the hand is
+            # still busy with the phrase before
             return F(0)
         writer = writers["B"] if ps.role == "contrast" else writers["A"]
         roles = roles_for(ps.kind, ps.bars)
@@ -451,7 +456,42 @@ class Composer:
         if ps.variation == "ornament":
             melody = _ornament(melody, harmony, self.rng, self.prof.ornaments, self.beat,
                                ps.key)
+        body = [m for m in melody if m.onset >= t]
+        if ps.role == "climax" and body and self.ensemble == "solo_piano":
+            # the climax sings its theme an octave higher, where it can
+            top = max(m.midi for m in melody)
+            ceiling = melody_style(self.prof.melody).climax_high
+            if top + 12 <= ceiling:
+                for m in melody:
+                    m.midi += 12
+                    m.pitch = Pitch.build(m.pitch.step, m.pitch.alter, m.pitch.octave + 1) \
+                        if m.pitch else m.pitch
+        if ps.role in ("return", "climax") and self.prof.harmony in ("romantic", "russian"):
+            harmony = self._recolour(harmony, body, ps)
         return Written(ps, t, harmony, melody, [], upbeat=src.upbeat)
+
+    def _recolour(self, harmony: list[Harmony], melody: list[MelNote], ps: PhraseSpec
+                  ) -> list[Harmony]:
+        """A return is not a copy: some of its chords come back richer —
+        a seventh, an added sixth, a borrowed colour — as long as the tune
+        still fits them."""
+        from .harmony import _alternatives, core as _core, _melody_weights
+        style = harmony_style(self.prof.harmony)
+        out = list(harmony)
+        for i, h in enumerate(harmony[:-2]):
+            if self.rng.random() > 0.35 or "/" in h.roman or h.pedal is not None:
+                continue
+            opts = [a for a in _alternatives(h.roman, ps.key, style)
+                    if _core(a) == _core(h.roman) and a != h.roman and "(" in a + "7"]
+            if not opts:
+                continue
+            alt = Harmony(self.rng.choice(opts), ps.key, h.onset, h.dur, cadence=h.cadence)
+            weights = _melody_weights(melody, h, self.beat)
+            clash_old = sum(w for pc, w in weights if pc not in h.pcs)
+            clash_new = sum(w for pc, w in weights if pc not in alt.pcs)
+            if clash_new <= clash_old:
+                out[i] = alt
+        return out
 
     # ------------------------------------------------------------------
     def _sheet(self, written: list[Written], form: FormPlan, end: F) -> Sheet:

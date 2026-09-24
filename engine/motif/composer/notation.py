@@ -267,6 +267,7 @@ class Sheet:
         for v in self.voices:
             if any(x.dur.denominator % 3 == 0 and x.tuplet is None for x in v.notes):
                 group_tuplets(v.notes)
+            _match_slurs(v.notes)
         by_voice = {v.label: _Cursor(v) for v in self.voices}
         pickup_bar = self.pickup > 0
         for b in range(1, self.bars + 1):
@@ -290,6 +291,22 @@ class Sheet:
             if chords:
                 lines.append("  H: " + " ".join(f"{sym}:{_dur_code(d)}" for d, sym in chords))
         return "\n".join(lines) + "\n"
+
+
+def _match_slurs(notes: list[Note]) -> None:
+    """Every slur that ends must have begun, and every slur that begins must
+    end — whatever happened to the notes between."""
+    open_at: list[Note] = []
+    for n in sorted(notes, key=lambda x: x.onset):
+        for _ in range(n.slur_start):
+            open_at.append(n)
+        if n.slur_stop:
+            closed = min(n.slur_stop, len(open_at))
+            for _ in range(closed):
+                open_at.pop()
+            n.slur_stop = closed
+    for n in open_at:
+        n.slur_start = max(0, n.slur_start - 1)
 
 
 def _bar_attributes(info: BarInfo) -> str:
