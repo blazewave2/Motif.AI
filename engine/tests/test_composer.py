@@ -282,3 +282,18 @@ def test_an_open_piece_can_be_arranged_for_other_forces():
     assert [p.name for p in score.parts] == ["Violin I", "Violin II", "Viola", "Violoncello"]
     original = read_musicxml(src.musicxml)
     assert score.measure_count == original.measure_count
+
+
+def test_asking_for_another_mood_rewrites_the_same_piece_in_it():
+    from motif.agent.agent import MotifAgent, Request
+    from motif.engrave.musicxml_reader import read_musicxml
+    agent = MotifAgent(options={"quality": "sketch"})
+    src = agent.run(Request(prompt="A Chopin nocturne in E flat major, 24 bars", seed=4))
+    before = read_musicxml(src.musicxml)
+    out = agent.run(Request(prompt="Make it darker", score_xml=src.musicxml, seed=9))
+    assert out.ok, out.error
+    after = read_musicxml(out.musicxml)
+    assert after.key.is_minor and after.key.tonic == before.key.tonic
+    assert after.measure_count == before.measure_count
+    assert after.metadata.get("style") == before.metadata.get("style")
+    assert "minor" in out.message

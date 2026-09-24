@@ -46,6 +46,25 @@ _DEVELOP_WORDS = ("develop", "vary", "variation", "elaborate", "expand on",
 _ARRANGE_WORDS = ("arrange", "orchestrate", "score this for", "score it for", "rewrite this for",
                   "rewrite it for", "transcribe this for", "transcribe it for", "set this for",
                   "make this a string quartet", "turn this into a")
+#: Asking for a different mood rewrites the piece in it.
+_MOOD_EDITS: list[tuple[tuple[str, ...], dict]] = [
+    (("darker", "more dark", "gloomier", "more sinister"),
+     dict(character="dark", minor=True, tempo=0.92, words="darker")),
+    (("sadder", "more sad", "more melancholy", "more tragic", "more mournful"),
+     dict(character="sad", minor=True, tempo=0.85, words="sadder")),
+    (("brighter", "happier", "more cheerful", "more joyful", "more uplifting"),
+     dict(character="joyful", minor=False, tempo=1.08, words="brighter")),
+    (("more dramatic", "more passionate", "more intense", "more stormy", "more epic"),
+     dict(character="dramatic", tempo=1.05, words="more dramatic")),
+    (("calmer", "more peaceful", "gentler", "more tender", "more serene"),
+     dict(character="calm", tempo=0.88, words="calmer")),
+    (("more romantic", "more lyrical", "more singing"),
+     dict(character="romantic", words="more lyrical")),
+    (("more mysterious", "eerier", "more haunting"),
+     dict(character="mysterious", minor=True, tempo=0.9, words="more mysterious")),
+    (("more playful", "lighter", "more whimsical"),
+     dict(character="playful", minor=False, tempo=1.1, words="more playful")),
+]
 _HARMONIZE_WORDS = ("harmonize", "harmonise", "add accompaniment", "accompany",
                     "add chords", "add a left hand", "add bass", "add harmony")
 _EDIT_WORDS = ("transpose", "make it", "change the", "slower", "faster", "louder",
@@ -369,6 +388,9 @@ class MotifAgent:
     def _edit(self, req: Request, existing: Score, info: ScoreAnalysis) -> Result:
         """Direct transformations of the score that is already there."""
         t = req.prompt.lower()
+        mood = next((spec for words, spec in _MOOD_EDITS if any(w in t for w in words)), None)
+        if mood is not None:
+            return self._revise(req, existing, info, mood)
         score = existing
         applied: list[str] = []
 
@@ -421,6 +443,55 @@ class MotifAgent:
         return Result(ok=True, message="Applied: " + ", ".join(applied) + ".",
                       musicxml=to_musicxml(score), midi=to_midi(score),
                       preview=summarise(score), analysis=analyse(score).describe())
+
+    def _revise(self, req: Request, existing: Score, info: ScoreAnalysis, mood: dict) -> Result:
+        """The same piece written again in another mood: its composer, form,
+        length, metre, forces and seed kept, its key turned to the parallel
+        minor or major when the mood asks, its tempo eased or quickened."""
+        t = req.prompt.lower()
+        meta = existing.metadata or {}
+        plan = self._plan_for(req)
+        plan.style = info.detected_style
+        genre = meta.get("form") or None
+        key = info.key
+        if mood.get("minor") is True and not key.is_minor:
+            key = Key(key.tonic, "minor")
+        elif mood.get("minor") is False and key.is_minor:
+            key = Key(key.tonic, "major")
+        plan.key = str(key)
+        plan.time = info.time
+        plan.time_given = True
+        factor = mood.get("tempo", 1.0)
+        if any(w in t for w in ("slower", "slow it")):
+            factor *= 0.85
+        elif any(w in t for w in ("faster", "quicker")):
+            factor *= 1.15
+        plan.tempo = int(max(36, min(200, round(info.tempo * factor))))
+        plan.tempo_given = True
+        plan.tempo_text = ""
+        plan.length_bars = max(8, info.bars)
+        plan.character = mood["character"]
+        ensemble = meta.get("ensemble") or info.ensemble
+        if ensemble:
+            plan.ensemble = ensemble
+        try:
+            plan.seed = int(meta.get("seed") or plan.seed)
+        except (TypeError, ValueError):
+            pass
+        plan.title = existing.title or plan.title
+        if " in " in plan.title and str(key) != str(info.key):
+            head, old = plan.title.rsplit(" in ", 1)
+            plain = old.replace("♭", "b").replace("♯", "#").strip()
+            if plain.lower() == str(info.key).lower():
+                plan.title = f"{head} in {key}"
+        plan.prompt = meta.get("prompt") or plan.prompt
+        described = mood["words"]
+
+        def message(p: CompositionPlan, summary: dict) -> str:
+            change = f", now in {p.key}" if str(key) != str(info.key) else ""
+            return (f"Here is **{p.title}** again, {described}{change} — the same composer, "
+                    f"form and length, written anew around the mood you asked for.")
+        return self._finish(plan, message, form=genre)
 
     def _analyze(self, req: Request, existing: Score, info: ScoreAnalysis) -> Result:
         chords = " | ".join(info.chord_summary[:16]) or "—"
