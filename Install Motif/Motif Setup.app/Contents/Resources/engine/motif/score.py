@@ -10,7 +10,7 @@ from typing import Iterable
 
 from .theory.pitch import Key, Pitch
 
-DIVISIONS = 480  # ticks per quarter note
+DIVISIONS = 10080  # ticks per quarter: exact for 3-, 5-, 6-, 7- and 9-note tuplets
 
 WHOLE = DIVISIONS * 4
 HALF = DIVISIONS * 2
@@ -142,6 +142,15 @@ class Note:
     chord_symbol: "ChordSymbol | None" = None
     fermata: bool = False
     arpeggiate: bool = False
+    grace_type: str = ""           # written value of a grace note ("16th", "eighth")
+    print_object: bool = True      # False: an invisible (spacer) rest
+    measure_rest: bool = False     # a whole-bar rest, centred whatever the metre
+    #: Per-pitch ties for chords where only some notes are held over. None
+    #: means the tie flags above apply to every pitch in the chord.
+    tie_start_pitches: list[int] | None = None
+    tie_stop_pitches: list[int] | None = None
+    more_slurs: list[tuple[str, int]] = field(default_factory=list)  # nested slurs
+    lyric_syllabic: str = ""       # single | begin | middle | end
 
     @property
     def is_rest(self) -> bool:
@@ -194,6 +203,8 @@ class Measure:
     repeat_end: bool = False
     ending: int | None = None
     width: float | None = None
+    implicit: bool = False                # a pickup bar, not counted in numbering
+    ending_type: str = ""                 # start | stop | both (volta brackets)
 
     def add(self, note: Note) -> Note:
         self.voices.setdefault(note.voice, []).append(note)
@@ -223,6 +234,11 @@ class Part:
     measures: list[Measure] = field(default_factory=list)
     volume: float = 78.0
     pan: float = 0.0
+    #: Written-to-sounding transposition as MusicXML spells it
+    #: (diatonic, chromatic, octave-change); None for concert-pitch parts.
+    transpose: tuple[int, int, int] | None = None
+    instrument_sound: str = ""
+    extra: dict = field(default_factory=dict)
 
     def measure(self, n: int) -> Measure:
         """1-based measure access, creating intervening bars as needed."""
@@ -236,10 +252,21 @@ class Part:
 @dataclass
 class TempoMark:
     measure: int
-    bpm: float
+    bpm: float                     # beats per minute of ``beat_unit``
     beat_unit: str = "quarter"
     text: str = ""
     dotted: bool = False
+    offset: int = 0                # ticks into the measure
+    visible: bool = True           # False: changes playback only (rit., accel.)
+
+    @property
+    def quarter_bpm(self) -> float:
+        """The same tempo counted in quarter notes, for playback."""
+        unit = {"whole": 4.0, "half": 2.0, "quarter": 1.0, "eighth": 0.5,
+                "16th": 0.25}.get(self.beat_unit, 1.0)
+        if self.dotted:
+            unit *= 1.5
+        return self.bpm * unit
 
 
 @dataclass

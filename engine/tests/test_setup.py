@@ -89,3 +89,56 @@ def test_preferences_has_no_composer_or_instrument_picker():
     for banned in ("styleoverride", "ensembleoverride", "styleoptions",
                   "ensembleoptions", "loadchoices"):
         assert banned not in main, f"MotifAI.qml still references {banned!r}"
+
+
+# ---------------------------------------------------------------------------
+# The install sequence
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def machine(tmp_path, monkeypatch):
+    """Every side effect of run_install, recorded instead of performed."""
+    calls = []
+    state = {"up": False}
+    monkeypatch.setattr(motif_setup, "_log", lambda text: None)
+    monkeypatch.setattr(motif_setup, "choose_plugin_dir", lambda: tmp_path)
+    monkeypatch.setattr(motif_setup, "install_plugin", lambda d: calls.append("panel"))
+    monkeypatch.setattr(motif_setup, "prepare_config", lambda: calls.append("config"))
+    monkeypatch.setattr(autostart, "is_running", lambda timeout=1.5: state["up"])
+
+    def stop():
+        calls.append("stop")
+        state["up"] = False
+
+    def start():
+        calls.append("start")
+        state["up"] = True
+    monkeypatch.setattr(autostart, "stop", stop)
+    monkeypatch.setattr(autostart, "start_now", start)
+    monkeypatch.setattr(autostart, "install_engine", lambda: calls.append("engine"))
+    monkeypatch.setattr(autostart, "install", lambda: calls.append("login item"))
+    monkeypatch.setattr(autostart, "install_starts_engine", lambda: False)
+    return calls, state
+
+
+def test_install_runs_every_step_in_order(machine):
+    calls, _ = machine
+    messages = []
+    assert motif_setup.run_install(lambda m, f: messages.append(m)) is True
+    assert calls == ["panel", "engine", "config", "login item", "start"]
+    assert messages[-1] == "Motif is ready."
+
+
+def test_repair_restarts_a_running_copy_with_the_new_version(machine):
+    calls, state = machine
+    state["up"] = True
+    assert motif_setup.run_install(lambda m, f: None) is True
+    assert calls[0] == "stop" and calls[-1] == "start"
+
+
+def test_no_second_copy_when_the_login_item_starts_motif(machine, monkeypatch):
+    calls, state = machine
+    monkeypatch.setattr(autostart, "install_starts_engine", lambda: True)
+    monkeypatch.setattr(autostart, "install",
+                        lambda: (calls.append("login item"), state.update(up=True)))
+    assert motif_setup.run_install(lambda m, f: None) is True
+    assert "start" not in calls

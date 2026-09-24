@@ -1,0 +1,125 @@
+title: Showcase
+subtitle: every notation feature at once
+composer: Motif.AI
+key: D minor
+time: 4/4
+tempo: 96 "Allegro moderato"
+part: Sop soprano "Soprano"
+part: Cl clarinet
+part: Hn horn
+part: Vn violin
+part: Vc cello
+part: Gtr guitar
+part: Org organ
+part: Pno piano
+
+m0
+  Sop: r:q
+  Cl: r:q
+  Hn: r:q
+  Vn: !mf A4:q
+  Vc: r:q
+  Gtr: r:q
+  Org.RH: r:q
+  Org.LH: r:q
+  Org.Ped: r:q
+  Pno.RH: r:q
+  Pno.LH: r:q
+m1 text="con fuoco"
+  Sop: !p (D5:q@"Ah," E5:e@"the" F5:e@"lo-" G5:h@"ve")
+  Cl: !p E4:h~ E4:q {3 F4:e G4:e A4:e}
+  Hn: !mp F4:w
+  Vn: D5:q+upbow+stacc E5:q+downbow F5:q+accent G5:q+marc
+  Vc: !f D3:h+ten A2:h+port
+  Gtr: [D3 A3 D4 F4]:h+arp r:h
+  Org.RH: [D4 F4 A4]:w
+  Org.LH: [D3 A3]:w
+  Org.Ped: D2:w
+  Pno.RH: !mf {5 D5:s E5:s F5:s G5:s A5:s} {7 A5:s G5:s F5:s E5:s D5:s C#5:s D5:s} F5:h
+  Pno.RH2: s:h A4:h
+  Pno.LH: !ped D2:e A2:e D3:e F3:e !ped A2:e E3:e A3:e C#4:e
+  H: i:h V7:h
+m2 repeat=start
+  Sop: A5:q.@"ah" G5:e@"my" F5:q@"heart" E5:q@"sings"
+  Cl: {acc G4:s} F4:q {app A4:e} G4:q {g B4:t A4:t} G4:q F4:q
+  Hn: G4:h A4:h
+  Vn: D6:q+harm C6:q+pizz B5:q A5:q+arco
+  Vc: D3:q+trem3 E3:q+trem2 F3:q+trem1 G3:q
+  Gtr: D4:e+f1 E4:e+f2 F4:e+f3 G4:e+f4 A4:q+f1 r:q
+  Org.RH: [D4 F4 A4]:h [C4 E4 G4]:h
+  Org.LH: A3:w
+  Org.Ped: D2:h C2:h
+  Pno.RH: !cresc (A5:e G5:e F5:e E5:e D5:e C#5:e D5:e E5:e) !end
+  Pno.LH: !ped D2:q A2:q F3:q A3:q
+m3 ending=1 repeat=end
+  Sop: D5:w@"Ah"
+  Cl: D4:w
+  Hn: F4:w
+  Vn: !dim [D4 A4]:w
+  Vc: D3:w
+  Gtr: [D3 A3 D4]:w
+  Org.RH: [D4 F4 A4]:w
+  Org.LH: D3:w
+  Org.Ped: D2:w
+  Pno.RH: [D5 F5 A5]:w+fermata
+  Pno.LH: !pedup [D2 D3]:w
+m4 ending=2 barline=double
+  Sop: F5:h@"end" r:h
+  Cl: R
+  Hn: R
+  Vn: F5:h !end r:h
+  Vc: D3:h r:h
+  Gtr: R
+  Org.RH: R
+  Org.LH: R
+  Org.Ped: R
+  Pno.RH: [F5 A5 D6]:h r:h
+  Pno.LH: [D2 D3]:h r:h
+m5 key="E major" tempo=112 "Più mosso" mark="B" clef.Vc=tenor
+  Sop: E5:q F#5:q G#5:h
+  Cl: E4:q F#4:q G#4:h
+  Hn: E4:w
+  Vn: B5:h. {3 C#6:e D#6:e E6:e}
+  Vc: E4:q F#4:q G#4:q A4:q
+  Gtr: [E3 B3 E4 G#4]:w
+  Org.RH: [E4 G#4 B4]:w
+  Org.LH: E3:w
+  Org.Ped: E2:w
+  Pno.RH: !fff E6:q B5:q G#5:q E5:q
+  Pno.LH: [E2 B2]:h [E2 B2]:h
+m6 time=3/4
+  Sop: E5:h.+prall
+  Cl: !fp E4:q+invturn F#4:q+sf G#4:q+stacciss
+  Hn: !sfz E4:h.
+  Vn: E5:q+tr "dolce" D#5:q+mord C#5:q+turn
+  Vc: B3:h.
+  Gtr: R
+  Org.RH: R
+  Org.LH: R
+  Org.Ped: R
+  Pno.RH: ^"rit." E5:q D#5:q C#5:q
+  Pno.LH: E3:h.
+m7 time=6/8 tempo=60 "Andante" barline=dashed
+  Sop: E5:q. F#5:q.
+  Cl: {2 G#4:e A4:e} B4:q.
+  Hn: E4:q. E4:q.
+  Vn: B5:e A5:e G#5:e F#5:q.
+  Vc: E3:q. B3:q.
+  Gtr: E3:e B3:e E4:e G#4:e B4:e E5:e
+  Org.RH: [E4 G#4 B4]:q. r:q.
+  Org.LH: E3:q. r:q.
+  Org.Ped: E2:q. r:q.
+  Pno.RH: _"a tempo" E5:e F#5:e G#5:e A5:q.
+  Pno.LH: E2:q. B2:q.
+m8 barline=final
+  Sop: E5:q.+fermata r:q.
+  Cl: E4:q.+fermata r:q.
+  Hn: E4:q. r:q.
+  Vn: [B4 G#5]:q.+fermata r:q.
+  Vc: E3:q. r:q.
+  Gtr: [E2 B2 E3 G#3 B3 E4]:q.+arp r:q.
+  Org.RH: [E4 G#4 B4]:q. r:q.
+  Org.LH: E3:q. r:q.
+  Org.Ped: E2:q. r:q.
+  Pno.RH: !pp [E5 G#5 B5]:q.+fermata r:q.
+  Pno.LH: [E2 B2 E3]:q. r:q.

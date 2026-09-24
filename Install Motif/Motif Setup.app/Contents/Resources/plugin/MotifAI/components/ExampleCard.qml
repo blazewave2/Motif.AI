@@ -1,5 +1,5 @@
 // One suggestion in the "Try these examples" list.
-import QtQuick 2.15
+import QtQuick 2.9
 
 import "../js/theme.js" as T
 

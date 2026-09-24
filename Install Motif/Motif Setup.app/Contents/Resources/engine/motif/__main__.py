@@ -20,6 +20,8 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--style", default=None)
     c.add_argument("--ensemble", default=None)
     c.add_argument("--midi", action="store_true", help="also write a MIDI file")
+    c.add_argument("--quality", choices=["maximum", "best", "balanced", "sketch"],
+                   default=None, help="how much care the composer takes")
 
     sub.add_parser("styles", help="list the available styles")
     sub.add_parser("token", help="print the local API token")
@@ -34,16 +36,30 @@ def main(argv: list[str] | None = None) -> int:
 
     if cmd == "compose":
         from pathlib import Path
-        from .agent.agent import MotifAgent, Request
+        from .agent.agent import Request
+        from .server.app import MotifState, ensure_config
+        cfg = ensure_config()
+        if args.quality:
+            cfg["composer_quality"] = args.quality
+        state = MotifState(cfg)
         prompt = " ".join(args.prompt)
-        result = MotifAgent().run(Request(prompt=prompt, seed=args.seed,
-                                          style=args.style, ensemble=args.ensemble))
+
+        def progress(update):
+            text = update if isinstance(update, str) else (
+                f"[{int(update.fraction * 100):3d}%] {update.label}"
+                + (f" — {update.detail}" if update.detail else ""))
+            print(f"  {text[:150]}", file=sys.stderr)
+
+        result = state.agent.run(Request(prompt=prompt, seed=args.seed, style=args.style,
+                                         ensemble=args.ensemble),
+                                 progress=progress)
         if not result.ok:
             print(f"error: {result.error}", file=sys.stderr)
             return 1
         out = Path(args.out)
         out.mkdir(parents=True, exist_ok=True)
-        name = (result.plan.title if result.plan else "motif").replace(" ", "-")
+        name = (result.title or (result.plan.title if result.plan else "")
+                or "motif").replace(" ", "-")
         xml = out / f"{name}.musicxml"
         xml.write_text(result.musicxml, encoding="utf-8")
         print(result.message)

@@ -1,6 +1,6 @@
 // A phrase mark — the curve from the wordmark — used as Motif's own mark
 // wherever a small brand accent is needed, and animated while it composes.
-import QtQuick 2.15
+import QtQuick 2.9
 
 import "../js/theme.js" as T
 

@@ -33,8 +33,8 @@ function request(base, token, method, path, body, onDone) {
         }
         if (xhr.status === 401) {
             onDone({ ok: false, unauthorised: true,
-                     error: "The plugin's token does not match the engine's. " +
-                            "Open Settings and paste the token from ~/.motif/config.json." });
+                     error: "The panel and the Motif engine don't recognise each other. " +
+                            "Open Motif Setup and choose Repair." });
             return;
         }
         if (xhr.status >= 400 && parsed && parsed.error) {
@@ -58,6 +58,28 @@ function health(base, token, onDone) {
 
 function compose(base, token, payload, onDone) {
     return request(base, token, "POST", "/compose", payload, onDone);
+}
+
+// Composing takes minutes, so the panel starts a job and watches it.
+function startJob(base, token, payload, onDone) {
+    return request(base, token, "POST", "/jobs", payload, onDone);
+}
+
+function job(base, token, id, onDone) {
+    return request(base, token, "GET", "/jobs/" + id, null, onDone);
+}
+
+function cancelJob(base, token, id, onDone) {
+    return request(base, token, "POST", "/jobs/" + id + "/cancel", {}, onDone);
+}
+
+// The composer's settings, such as how much care it takes.
+function settings(base, token, onDone) {
+    return request(base, token, "GET", "/settings", null, onDone);
+}
+
+function saveSettings(base, token, values, onDone) {
+    return request(base, token, "POST", "/settings", values, onDone);
 }
 
 // Polled while a composition is in flight, so the panel can show what Motif

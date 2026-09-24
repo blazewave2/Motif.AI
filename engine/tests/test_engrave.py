@@ -45,8 +45,8 @@ class TestDurations:
         assert len(pieces) > 1
 
     def test_splits_always_preserve_total(self):
-        for offset in range(0, WHOLE, 120):
-            for dur in range(120, WHOLE + 1, 120):
+        for offset in range(0, WHOLE, SIXTEENTH):
+            for dur in range(SIXTEENTH, WHOLE + 1, SIXTEENTH):
                 if offset + dur > WHOLE:
                     continue
                 assert sum(split_duration(dur, offset, QUARTER, WHOLE)) == dur

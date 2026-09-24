@@ -78,55 +78,78 @@ def prepare_config() -> Path:
     return CONFIG_DIR / "config.json"
 
 
+def _wait_until(condition, seconds: float) -> bool:
+    end = time.monotonic() + seconds
+    while True:
+        if condition():
+            return True
+        if time.monotonic() >= end:
+            return False
+        time.sleep(0.4)
+
+
 def run_install(report) -> bool:
     """Perform the whole setup, reporting progress through ``report``."""
-    report("Installing the Motif panel…", 0.10)
-    dest = install_plugin(choose_plugin_dir())
+    # A copy that is already running is stopped first, so that what starts at
+    # the end is the version just installed rather than the one it replaces
+    # (and so nothing it has open is in the way while its files are swapped).
+    if autostart.is_running(0.6):
+        report("Pausing Motif while it is updated…", 0.04)
+        autostart.stop()
+        _wait_until(lambda: not autostart.is_running(0.5), 8)
+
+    report("Installing the Motif panel…", 0.08)
+    install_plugin(choose_plugin_dir())
 
     # Copied to a permanent, per-user location rather than run from wherever
     # Setup itself happens to be sitting — Setup is an installer, and an
     # installer is something you should be able to delete once it has done
     # its job without breaking the thing it installed.
-    report("Installing the Motif engine…", 0.25)
+    report("Installing the Motif engine…", 0.16)
     autostart.install_engine()
 
-    report("Preparing your Motif folder…", 0.40)
+    report("Preparing your Motif folder…", 0.3)
     prepare_config()
 
-    report("Setting Motif to start with your computer…", 0.55)
+    report("Setting Motif to start with your computer…", 0.5)
+    registered = False
     try:
         autostart.install()
+        registered = True
     except (OSError, RuntimeError) as exc:
-        report(f"Could not set Motif to start automatically ({exc}).", 0.55)
+        report(f"Could not set Motif to start automatically ({exc}).", 0.5)
 
-    report("Waking Motif…", 0.75)
-    autostart.start_now()
-    for _ in range(24):
-        if autostart.is_running(0.7):
-            report("Motif is ready.", 1.0)
-            return True
-        time.sleep(0.4)
-    report("Motif is installed, but it hasn’t answered yet.", 1.0)
-    return False
+    report("Waking Motif…", 0.7)
+    # Registering the login item has already started Motif on some systems;
+    # starting a second copy alongside it would only compete for the port.
+    already = registered and autostart.install_starts_engine()
+    if not _wait_until(lambda: autostart.is_running(0.5), 8 if already else 0):
+        autostart.start_now()
+    if not _wait_until(lambda: autostart.is_running(0.7), 20):
+        report("Motif is installed, but it hasn’t answered yet.", 1.0)
+        return False
+    report("Motif is ready.", 1.0)
+    return True
 
 
 def run_remove(report) -> None:
-    report("Stopping Motif…", 0.2)
+    report("Stopping Motif…", 0.15)
     autostart.stop()
-    report("Removing the login item…", 0.4)
+    report("Removing the login item…", 0.3)
     autostart.remove()
-    report("Removing the panel…", 0.6)
+    report("Removing the panel…", 0.45)
     for d in musescore_plugin_dirs():
         dest = d / PLUGIN_NAME
         if dest.is_symlink():
             dest.unlink()
         elif dest.exists():
             shutil.rmtree(dest)
-    report("Removing the installed engine…", 0.85)
+    report("Removing the installed engine…", 0.8)
     engine_dir = autostart.engine_path()
     if engine_dir.exists() and engine_dir.is_relative_to(autostart.motif_home()):
         shutil.rmtree(engine_dir, ignore_errors=True)
-    report("Motif has been removed.", 1.0)
+    report("Motif has been removed. The scores it wrote are still in the "
+           ".motif folder in your home folder.", 1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -355,8 +378,12 @@ def run_console(argv: list[str]) -> int:
     double-clicking."""
     action = "remove" if "--remove" in argv else "install"
 
+    last = {"message": ""}
+
     def report(message, fraction):
-        print(f"  {message}")
+        if message != last["message"]:
+            print(f"  {message}")
+        last["message"] = message
 
     print(f"\n  {APP} Setup\n")
     if action == "remove":
@@ -373,17 +400,21 @@ def _run_headless(want_remove: bool) -> int:
     """The graphical window could not be shown — do the real work anyway,
     and report the outcome through a native dialog rather than print(),
     which nobody double-clicking an app will ever see."""
+    last = {"message": ""}
+
     def report(message, fraction):
-        _log(message)
+        if message != last["message"]:
+            _log(message)
+        last["message"] = message
     try:
         if want_remove:
             run_remove(report)
-            _native_alert(f"{APP} Setup", "Motif has been removed.")
+            _native_alert(f"{APP} Setup", last["message"] or "Motif has been removed.")
             return 0
         ok = run_install(report)
         if ok:
             _native_alert(f"{APP} Setup",
-                "Motif is installed and ready.\n\n"
+                (last["message"] or "Motif is installed and ready.") + "\n\n"
                 "Open MuseScore, then choose Motif.AI from the Plugins menu.")
         else:
             _native_alert(f"{APP} Setup",

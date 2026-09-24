@@ -1,5 +1,5 @@
 // The Motif.AI wordmark, drawn from the supplied artwork.
-import QtQuick 2.15
+import QtQuick 2.9
 
 Image {
     id: mark

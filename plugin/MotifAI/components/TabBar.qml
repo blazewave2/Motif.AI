@@ -1,5 +1,5 @@
 // The Create / Chat switch pinned to the bottom of the panel.
-import QtQuick 2.15
+import QtQuick 2.9
 
 import "../js/theme.js" as T
 

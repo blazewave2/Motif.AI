@@ -5,7 +5,9 @@
 // string quartet", "continue in the same style" — because a picker can only
 // ever offer a fixed set of choices, and asking is always more flexible than
 // choosing from a menu that will always be missing something.
-import QtQuick 2.15
+//
+// What *is* here is how much care the composer takes.
+import QtQuick 2.9
 
 import "../js/theme.js" as T
 
@@ -14,8 +16,16 @@ Item {
     property bool autoOpen: true
     property string versionText: ""
     property bool connected: false
+    property string quality: "best"
+
+    // What was just chosen, for the handlers in MotifAI.qml to read:
+    // MuseScore 3 runs on a Qt too old to pass a signal's value to a handler
+    // by name, so the signals below carry it only for newer ones.
+    property alias pickedQuality: qualityChoice.picked
+
     signal changed(bool openAutomatically)
     signal closed()
+    signal qualityChosen(string value)
 
     implicitHeight: col.implicitHeight
 
@@ -44,14 +54,54 @@ Item {
             }
         }
 
+        // -- the composer ------------------------------------------------
+        Column {
+            width: parent.width
+            spacing: 12
+
+            ChoiceRow {
+                id: qualityChoice
+                width: parent.width
+                label: "Care"
+                value: panel.quality
+                options: [
+                    { value: "maximum", title: "Maximum",
+                      hint: "Tries the most ideas and revises the longest. The finest music; "
+                            + "a long piece can take several minutes." },
+                    { value: "best", title: "Best",
+                      hint: "Weighs many themes, harmonisations and textures, keeps the "
+                            + "strongest, and reviews what it wrote. The default." },
+                    { value: "balanced", title: "Balanced",
+                      hint: "Fewer ideas tried, one review. Noticeably quicker." },
+                    { value: "sketch", title: "Quick sketch",
+                      hint: "Takes the first good idea, for trying things out." }
+                ]
+                onChosen: panel.qualityChosen(qualityChoice.picked)
+            }
+
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                color: T.textFaint
+                font.family: T.sans
+                font.pixelSize: T.fsTiny
+                lineHeight: 1.3
+                text: "Motif's composer runs entirely on this computer. Nothing you ask "
+                      + "for, and no score you have open, is ever sent anywhere."
+            }
+        }
+
+        Rectangle { width: parent.width; height: 1; color: T.border }
+
         Toggle {
+            id: autoOpenToggle
             width: parent.width
             label: "Open new scores automatically"
             hint: "Turn this off to keep the score in the panel until you ask for it."
             checked: panel.autoOpen
-            onToggled: function (v) {
-                panel.autoOpen = v;
-                panel.changed(v);
+            onToggled: {
+                panel.autoOpen = autoOpenToggle.checked;
+                panel.changed(autoOpenToggle.checked);
             }
         }
 

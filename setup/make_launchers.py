@@ -116,8 +116,8 @@ def build_macos_app() -> Path:
         "CFBundleDisplayName": APP_NAME,
         "CFBundleExecutable": "MotifSetup",
         "CFBundleIdentifier": "ai.motif.setup",
-        "CFBundleVersion": "1.0.0",
-        "CFBundleShortVersionString": "1.0.0",
+        "CFBundleVersion": "2.0.0",
+        "CFBundleShortVersionString": "2.0.0",
         "CFBundlePackageType": "APPL",
         "LSMinimumSystemVersion": "10.13",
         "NSHighResolutionCapable": True,
@@ -239,7 +239,11 @@ def main() -> None:
         "Setup adds Motif to MuseScore and sets it to start with your\n"
         "computer. Then open MuseScore and choose Motif.AI from the\n"
         "Plugins menu.\n\n"
-        "To remove Motif, open Setup again and choose Remove.\n")
+        "Motif's composer runs entirely on your computer: no account, no\n"
+        "internet connection, and nothing you write or open is ever sent\n"
+        "anywhere.\n\n"
+        "To remove Motif, open Setup again and choose Remove. The scores it\n"
+        "wrote stay in the .motif folder in your home folder.\n")
     for p in (app, win, lin):
         print("  built", p.relative_to(ROOT))
 

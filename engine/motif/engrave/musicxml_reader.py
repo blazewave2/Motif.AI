@@ -10,7 +10,7 @@ import re
 import zipfile
 from xml.etree import ElementTree as ET
 
-from ..score import Direction, Measure, Note, Part, Score, TempoMark
+from ..score import DIVISIONS as DIVISIONS_DEFAULT, Direction, Measure, Note, Part, Score, TempoMark
 from ..theory.pitch import Key, Pitch
 
 _CLEF_BACK = {("G", 2): "G", ("F", 4): "F", ("C", 3): "C", ("C", 4): "tenor",
@@ -41,7 +41,7 @@ def read_musicxml(data: str | bytes) -> Score:
             _text(sp, "part-abbreviation") or "",
             int(_text(sp, "midi-instrument/midi-program") or 1) - 1)
 
-    divisions = 480
+    divisions = DIVISIONS_DEFAULT
     first = True
     for pnode in root.findall("part"):
         pid = pnode.get("id") or f"P{len(score.parts)+1}"
@@ -57,6 +57,13 @@ def read_musicxml(data: str | bytes) -> Score:
 
 
 def _read_part(pnode, part: Part, score: Score, divisions: int, first: bool) -> int:
+    """Read one part, tracking the time position through backup and forward.
+
+    MusicXML writes voices one after another inside a bar and rewinds with
+    <backup>; a voice that enters mid-bar is preceded by a <forward>. The
+    position has to be followed exactly, or a second voice lands on beat
+    one and every mid-bar dynamic slides to the start of the bar.
+    """
     from ..score import DIVISIONS
     scale = DIVISIONS / divisions
     index = 0
@@ -66,67 +73,134 @@ def _read_part(pnode, part: Part, score: Score, divisions: int, first: bool) -> 
         index += 1
         num = index
         m = part.measure(index)
-        attrs = mnode.find("attributes")
-        if attrs is not None:
-            d = attrs.findtext("divisions")
-            if d:
-                divisions = max(1, int(float(d)))
-                scale = DIVISIONS / divisions
-            k = attrs.find("key")
-            if k is not None:
-                fifths = int(k.findtext("fifths") or 0)
-                mode = (k.findtext("mode") or "major").lower()
-                key = _key_from_fifths(fifths, mode)
-                if first and num == 1:
-                    score.key = key
-                m.key = key
-            t = attrs.find("time")
-            if t is not None:
-                time = (int(t.findtext("beats") or 4), int(t.findtext("beat-type") or 4))
-                if first and num == 1:
-                    score.time = time
-                m.time = time
-            st = attrs.findtext("staves")
-            if st:
-                part.staves = max(part.staves, int(st))
-            for c in attrs.findall("clef"):
-                sign = c.findtext("sign") or "G"
-                line = int(c.findtext("line") or 2)
-                staff = int(c.get("number") or 1)
-                part.clefs[staff] = _CLEF_BACK.get((sign, line), "G")
-
-        for dnode in mnode.findall("direction"):
-            _read_direction(dnode, m, scale)
-            mm = dnode.find("direction-type/metronome")
-            if mm is not None:
-                per = (mm.findtext("per-minute") or "").strip()
-                if re.match(r"^\d+(\.\d+)?$", per):
-                    score.tempos.append(TempoMark(num, float(per)))
-
+        if (mnode.get("implicit") or "").lower() == "yes" and index == 1:
+            m.implicit = True
+        pos = 0                                  # ticks from the start of the bar
+        voice_end: dict[int, int] = {}
         pending: Note | None = None
-        for nnode in mnode.findall("note"):
-            note, is_chord = _read_note(nnode, scale)
-            if is_chord and pending is not None:
-                pending.pitches.extend(note.pitches)
-                continue
-            m.add(note)
-            pending = note
+
+        for child in mnode:
+            tag = child.tag
+            if tag == "attributes":
+                d = child.findtext("divisions")
+                if d:
+                    divisions = max(1, int(float(d)))
+                    scale = DIVISIONS / divisions
+                k = child.find("key")
+                if k is not None and k.findtext("fifths") is not None:
+                    fifths = int(k.findtext("fifths") or 0)
+                    mode = (k.findtext("mode") or "major").lower()
+                    key = _key_from_fifths(fifths, mode)
+                    if first and num == 1:
+                        score.key = key
+                    m.key = key
+                t = child.find("time")
+                if t is not None and t.findtext("beats"):
+                    try:
+                        time = (int(t.findtext("beats") or 4), int(t.findtext("beat-type") or 4))
+                    except ValueError:
+                        time = (4, 4)
+                    if first and num == 1:
+                        score.time = time
+                    m.time = time
+                st = child.findtext("staves")
+                if st:
+                    part.staves = max(part.staves, int(st))
+                for c in child.findall("clef"):
+                    sign = c.findtext("sign") or "G"
+                    line = int(c.findtext("line") or 2)
+                    octave = int(c.findtext("clef-octave-change") or 0)
+                    staff = int(c.get("number") or 1)
+                    name = _CLEF_BACK.get((sign, line), "G")
+                    if name == "G" and octave == -1:
+                        name = "G8vb"
+                    if num == 1 and pos == 0:
+                        part.clefs[staff] = name
+                    else:
+                        m.clefs = dict(m.clefs or {})
+                        m.clefs[staff] = name
+                tr = child.find("transpose")
+                if tr is not None and part.transpose is None:
+                    part.transpose = (int(tr.findtext("diatonic") or 0),
+                                      int(tr.findtext("chromatic") or 0),
+                                      int(tr.findtext("octave-change") or 0))
+            elif tag == "backup":
+                pos = max(0, pos - int(round(float(child.findtext("duration") or 0) * scale)))
+            elif tag == "forward":
+                pos += int(round(float(child.findtext("duration") or 0) * scale))
+            elif tag == "direction":
+                off = int(round(float(child.findtext("offset") or 0) * scale))
+                _read_direction(child, m, pos + off)
+                tempo = _direction_tempo(child, num, pos + off)
+                if tempo is not None and first:
+                    score.tempos.append(tempo)
+            elif tag == "sound":
+                bpm = child.get("tempo")
+                if bpm and first:
+                    try:
+                        score.tempos.append(TempoMark(num, float(bpm), offset=pos,
+                                                      visible=False))
+                    except ValueError:
+                        pass
+            elif tag == "barline":
+                _read_barline(child, m)
+            elif tag == "note":
+                note, is_chord, chord_ties = _read_note(child, scale)
+                if is_chord and pending is not None:
+                    pending.pitches.extend(note.pitches)
+                    _merge_chord_ties(pending, note, chord_ties)
+                    continue
+                if note.grace:
+                    m.add(note)
+                    continue
+                v = note.voice
+                end = voice_end.get(v, 0)
+                if pos > end:
+                    # The voice was silent until here: keep it in time with
+                    # an invisible rest rather than pulling the note forward.
+                    gap = Note([], pos - end, voice=v, staff=note.staff, print_object=False)
+                    m.add(gap)
+                m.add(note)
+                pending = note
+                pos += note.duration
+                voice_end[v] = max(end, pos)
     if score.tempos:
-        score.tempo = score.tempos[0].bpm
+        visible = [t for t in score.tempos if t.visible]
+        score.tempo = (visible or score.tempos)[0].quarter_bpm
     return divisions
 
 
-def _read_note(nnode, scale: float) -> tuple[Note, bool]:
-    from ..score import QUARTER
+def _merge_chord_ties(head: Note, extra: Note, ties: dict) -> None:
+    """Chord members carry their own <tie> elements; keep them per pitch."""
+    start = set(head.tie_start_pitches or ([p.midi for p in head.pitches[:-len(extra.pitches)]]
+                                           if head.tie_start else []))
+    stop = set(head.tie_stop_pitches or ([p.midi for p in head.pitches[:-len(extra.pitches)]]
+                                         if head.tie_stop else []))
+    for p in extra.pitches:
+        if ties.get("start"):
+            start.add(p.midi)
+        if ties.get("stop"):
+            stop.add(p.midi)
+    all_midi = {p.midi for p in head.pitches}
+    head.tie_start = bool(start)
+    head.tie_stop = bool(stop)
+    head.tie_start_pitches = None if start == all_midi else sorted(start)
+    head.tie_stop_pitches = None if stop == all_midi else sorted(stop)
+
+
+def _read_note(nnode, scale: float):
+    from ..score import QUARTER, Tuplet
     is_chord = nnode.find("chord") is not None
-    grace = nnode.find("grace") is not None
+    grace_node = nnode.find("grace")
+    grace = grace_node is not None
     dur = nnode.findtext("duration")
     ticks = int(round(float(dur) * scale)) if dur else (QUARTER // 4 if grace else QUARTER)
     pitches: list[Pitch] = []
     pn = nnode.find("pitch")
+    rest = nnode.find("rest")
     if pn is not None:
         step = pn.findtext("step") or "C"
-        alter = int(float(pn.findtext("alter") or 0))
+        alter = int(round(float(pn.findtext("alter") or 0)))
         octave = int(pn.findtext("octave") or 4)
         pitches.append(Pitch.build(step, alter, octave))
     elif nnode.find("unpitched") is not None:
@@ -134,57 +208,163 @@ def _read_note(nnode, scale: float) -> tuple[Note, bool]:
     voice = int(nnode.findtext("voice") or 1)
     staff = int(nnode.findtext("staff") or 1)
     n = Note(pitches, max(1, ticks), voice=voice, staff=staff, grace=grace)
+    if grace:
+        n.grace_slash = (grace_node.get("slash") or "") == "yes"
+        n.grace_type = nnode.findtext("type") or "16th"
+    if (nnode.get("print-object") or "").lower() == "no":
+        n.print_object = False
+    if rest is not None and (rest.get("measure") or "").lower() == "yes":
+        n.measure_rest = True
+    ties = {"start": False, "stop": False}
     for tie in nnode.findall("tie"):
         if tie.get("type") == "start":
             n.tie_start = True
+            ties["start"] = True
         elif tie.get("type") == "stop":
             n.tie_stop = True
+            ties["stop"] = True
+    tm = nnode.find("time-modification")
+    if tm is not None:
+        try:
+            actual = int(tm.findtext("actual-notes") or 3)
+            normal = int(tm.findtext("normal-notes") or 2)
+            n.tuplet = Tuplet(actual, normal, nnode.findtext("type") or "eighth")
+        except ValueError:
+            n.tuplet = None
     nots = nnode.find("notations")
     if nots is not None:
         for sl in nots.findall("slur"):
             num = int(sl.get("number") or 1)
             if sl.get("type") == "start":
-                n.slur_start = num
+                if n.slur_start:
+                    n.more_slurs.append(("start", num))
+                else:
+                    n.slur_start = num
             elif sl.get("type") == "stop":
-                n.slur_stop = num
+                if n.slur_stop:
+                    n.more_slurs.append(("stop", num))
+                else:
+                    n.slur_stop = num
+        for tup in nots.findall("tuplet"):
+            if n.tuplet is not None:
+                if tup.get("type") == "start":
+                    n.tuplet.start = True
+                elif tup.get("type") == "stop":
+                    n.tuplet.stop = True
         arts = nots.find("articulations")
         if arts is not None:
             n.articulations = [child.tag for child in arts]
         orns = nots.find("ornaments")
         if orns is not None:
             n.ornaments = [child.tag for child in orns if child.tag != "tremolo"]
+            trem = orns.find("tremolo")
+            if trem is not None and (trem.get("type") or "single") == "single":
+                try:
+                    n.tremolo = int((trem.text or "3").strip())
+                except ValueError:
+                    n.tremolo = 3
+        tech = nots.find("technical")
+        if tech is not None:
+            for child in tech:
+                if child.tag == "fingering" and (child.text or "").strip().isdigit():
+                    n.technical.append(child.text.strip())
+                elif child.tag in ("up-bow", "down-bow", "harmonic", "open-string"):
+                    n.technical.append(child.tag)
         if nots.find("fermata") is not None:
             n.fermata = True
-    lyric = nnode.findtext("lyric/text")
-    if lyric:
-        n.lyric = lyric
-    return n, is_chord
+        if nots.find("arpeggiate") is not None:
+            n.arpeggiate = True
+    ly = nnode.find("lyric")
+    if ly is not None and ly.findtext("text"):
+        n.lyric = ly.findtext("text")
+        n.lyric_syllabic = ly.findtext("syllabic") or "single"
+    return n, is_chord, ties
 
 
-def _read_direction(dnode, m: Measure, scale: float) -> None:
+def _read_direction(dnode, m: Measure, offset: int) -> None:
     placement = dnode.get("placement") or "below"
     staff = int(dnode.findtext("staff") or 1)
-    offset = int(round(float(dnode.findtext("offset") or 0) * scale))
-    dt = dnode.find("direction-type")
-    if dt is None:
-        return
-    dyn = dt.find("dynamics")
-    if dyn is not None and len(dyn):
-        m.directions.append(Direction("dynamics", dyn[0].tag, offset, staff, placement))
-        return
-    w = dt.find("wedge")
-    if w is not None:
-        m.directions.append(Direction("wedge", w.get("type") or "crescendo",
-                                      offset, staff, placement))
-        return
-    ped = dt.find("pedal")
-    if ped is not None:
-        m.directions.append(Direction("pedal", ped.get("type") or "start",
-                                      offset, staff, placement))
-        return
-    words = dt.findtext("words")
-    if words:
-        m.directions.append(Direction("words", words.strip(), offset, staff, placement))
+    for dt in dnode.findall("direction-type"):
+        dyn = dt.find("dynamics")
+        if dyn is not None and len(dyn):
+            tag = dyn[0].tag
+            if tag == "other-dynamics":
+                tag = (dyn[0].text or "mf").strip()
+            m.directions.append(Direction("dynamics", tag, offset, staff, placement))
+            continue
+        w = dt.find("wedge")
+        if w is not None:
+            m.directions.append(Direction("wedge", w.get("type") or "crescendo",
+                                          offset, staff, placement,
+                                          extra={"number": int(w.get("number") or 1)}))
+            continue
+        ped = dt.find("pedal")
+        if ped is not None:
+            m.directions.append(Direction("pedal", ped.get("type") or "start",
+                                          offset, staff, placement))
+            continue
+        reh = dt.findtext("rehearsal")
+        if reh:
+            m.directions.append(Direction("rehearsal", reh.strip(), offset, staff, "above"))
+            continue
+        if dt.find("metronome") is not None:
+            continue                      # read separately as a tempo mark
+        words = dt.findtext("words")
+        if words and words.strip():
+            has_metronome = dnode.find("direction-type/metronome") is not None
+            if has_metronome:
+                continue                  # the tempo mark carries this text
+            m.directions.append(Direction("words", words.strip(), offset, staff, placement))
+
+
+def _direction_tempo(dnode, measure: int, offset: int) -> TempoMark | None:
+    """A tempo marking, visible or not, from one <direction>."""
+    met = dnode.find("direction-type/metronome")
+    sound = dnode.find("sound")
+    text = ""
+    for dt in dnode.findall("direction-type"):
+        w = dt.findtext("words")
+        if w and w.strip():
+            text = w.strip()
+    if met is not None:
+        per = (met.findtext("per-minute") or "").strip()
+        num = re.match(r"^(\d+(?:\.\d+)?)", per)
+        if num:
+            return TempoMark(measure, float(num.group(1)),
+                             met.findtext("beat-unit") or "quarter", text,
+                             met.find("beat-unit-dot") is not None, offset=offset)
+    if sound is not None and sound.get("tempo"):
+        try:
+            bpm = float(sound.get("tempo"))
+        except ValueError:
+            return None
+        return TempoMark(measure, bpm, "quarter", text, False, offset=offset,
+                         visible=bool(text))
+    return None
+
+
+def _read_barline(bnode, m: Measure) -> None:
+    loc = bnode.get("location") or "right"
+    style = bnode.findtext("bar-style") or ""
+    rep = bnode.find("repeat")
+    if rep is not None:
+        if rep.get("direction") == "forward":
+            m.repeat_start = True
+        elif rep.get("direction") == "backward":
+            m.repeat_end = True
+    end = bnode.find("ending")
+    if end is not None:
+        try:
+            m.ending = int((end.get("number") or "1").split(",")[0].strip())
+        except ValueError:
+            m.ending = 1
+        kind = end.get("type") or ""
+        if kind == "start":
+            m.ending_type = "both" if m.ending_type == "stop" else "start"
+        elif kind in ("stop", "discontinue"):
+            m.ending_type = "both" if m.ending_type == "start" else "stop"
+    if loc == "right" and style and rep is None and style not in ("regular",):
+        m.barline = style
 
 
 _FIFTHS_MAJOR = {0: "C", 1: "G", 2: "D", 3: "A", 4: "E", 5: "B", 6: "F#", 7: "C#",

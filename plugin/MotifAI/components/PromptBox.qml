@@ -1,6 +1,6 @@
 // The prompt field: a rounded input that grows with the text, with a submit
 // affordance that only lights up when there is something to send.
-import QtQuick 2.15
+import QtQuick 2.9
 
 import "../js/theme.js" as T
 
@@ -10,6 +10,9 @@ Item {
     property alias text: input.text
     property bool busy: false
     property bool interactive: true
+    // What was just sent, for handlers to read: MuseScore 3 runs on a Qt
+    // too old to pass a signal's value to a handler by name.
+    property string lastSubmitted: ""
     signal submitted(string value)
 
     implicitHeight: Math.max(96, input.implicitHeight + 46)
@@ -19,7 +22,20 @@ Item {
     function send() {
         var v = input.text.trim();
         if (v.length === 0 || busy || !interactive) return;
+        box.lastSubmitted = v;
         box.submitted(v);
+    }
+
+    // Enter sends; Shift+Enter inserts a newline, as in any chat field.
+    function keyPressed(event) {
+        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+            if (event.modifiers & Qt.ShiftModifier) {
+                event.accepted = false;
+            } else {
+                event.accepted = true;
+                box.send();
+            }
+        }
     }
 
     Rectangle {
@@ -30,6 +46,18 @@ Item {
         border.width: 1
         border.color: input.activeFocus ? T.borderFocus : T.border
         Behavior on border.color { ColorAnimation { duration: T.durFast } }
+
+        // A click anywhere in the box puts the cursor in it, not only a click
+        // on the line of text, which is all the TextEdit itself covers.
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.IBeamCursor
+            enabled: box.interactive
+            onClicked: {
+                input.forceActiveFocus();
+                input.cursorPosition = input.length;
+            }
+        }
 
         TextEdit {
             id: input
@@ -47,17 +75,10 @@ Item {
             enabled: box.interactive
             textFormat: TextEdit.PlainText
 
-            // Enter sends; Shift+Enter inserts a newline, as in any chat field.
-            Keys.onPressed: function(event) {
-                if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                    if (event.modifiers & Qt.ShiftModifier) {
-                        event.accepted = false;
-                    } else {
-                        event.accepted = true;
-                        box.send();
-                    }
-                }
-            }
+            // Connected in script rather than written as Keys.onPressed so
+            // the event arrives as a named parameter on every Qt MuseScore
+            // ships with, from MuseScore 3's Qt 5.9 to MuseScore 4's Qt 6.
+            Component.onCompleted: Keys.pressed.connect(box.keyPressed)
         }
 
         Text {

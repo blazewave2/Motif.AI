@@ -4,6 +4,7 @@ from __future__ import annotations
 import random
 from dataclasses import replace
 
+from ..control import report
 from ..engrave.beaming import apply_beams
 from ..engrave.layout import fill_empty_measures, merge_tied_rests, place_direction, place_voice
 from ..plan import CompositionPlan, InstrumentPlan, SectionPlan
@@ -56,11 +57,7 @@ class Composer:
         self._decorated: list[int] = []    # ticks already carrying a decoration
 
     def _report(self, text: str) -> None:
-        if self._progress is not None:
-            try:
-                self._progress(text)
-            except Exception:
-                pass          # a broken status display must never break composing
+        report(self._progress, text)
 
     # ------------------------------------------------------------------
     def render(self) -> Score:

@@ -1,15 +1,18 @@
 """The Motif agent: understand a request, act on it, return a score.
 
-Intent routing is deterministic and local.  A configured LLM planner refines
-the plan when available, but every path here works without one.
+Everything here runs on this computer: understanding the request, composing,
+and engraving. Nothing is sent anywhere.
 """
 from __future__ import annotations
 
+import json
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 
 from ..compose.composer import compose
+from ..control import Cancelled
 from ..compose.forms import build_sections
 from ..compose.orchestration import INSTRUMENTS, build_instruments
 from ..compose.styles import resolve_style
@@ -58,6 +61,8 @@ class Request:
     ensemble: str | None = None
     history: list[dict] = field(default_factory=list)
     use_model: bool = True
+    session_id: str | None = None        # the conversation this request belongs to
+    cancel: threading.Event | None = None
 
 
 @dataclass
@@ -76,14 +81,24 @@ class Result:
     #: The musician had a score open but it was still blank. A new piece
     #: belongs in that empty page rather than in a second tab beside it.
     open_score_empty: bool = False
+    engine: str = "motif"
+    title: str = ""
+    notes: list[str] = field(default_factory=list)   # what the composer decided
+    based_on: str = ""                   # open_score | last_piece
+    changed: tuple[int, int] | None = None
+    session_id: str = ""
 
 
 class MotifAgent:
-    def __init__(self, model=None, planner=None, voice_model=None):
+    def __init__(self, model=None, voice_model=None, sessions=None,
+                 options: dict | None = None):
         self.model = model
-        self.planner = planner       # optional LLM planner
         self.voice_model = voice_model   # optional: rewrites the chat replies
+        self.sessions = sessions
+        #: Composer settings chosen in the panel, such as how much care to take.
+        self.options = options or {}
         self._progress = None        # set for the duration of a single run()
+        self._cancel: threading.Event | None = None
 
     # ------------------------------------------------------------------
     def classify(self, prompt: str, has_score: bool) -> str:
@@ -103,12 +118,24 @@ class MotifAgent:
         # A bare descriptive request with a score present means a new piece.
         return "create"
 
+    def report(self, update) -> None:
+        """Pass progress to the panel, and stop here if the musician asked to."""
+        if self._cancel is not None and self._cancel.is_set():
+            raise Cancelled()
+        if self._progress is not None:
+            try:
+                self._progress(update)
+            except Exception:
+                pass          # a broken status display must never break composing
+
     def run(self, req: Request, progress=None) -> Result:
         # The caller already serialises requests through a single lock, so an
         # instance attribute for "the callback for whichever run is
         # currently happening" is safe rather than needing its own lock.
         self._progress = progress
+        self._cancel = req.cancel
         started = time.time()
+        session = self.sessions.get(req.session_id) if self.sessions is not None else None
         try:
             existing: Score | None = None
             if req.score_xml and req.score_xml.strip():
@@ -133,14 +160,33 @@ class MotifAgent:
             result = handler(req, existing, info)
             result.intent = intent
             result.open_score_empty = open_score_empty
-            result.elapsed_ms = int((time.time() - started) * 1000)
-            return result
+            if existing is not None and intent != "create":
+                result.based_on = "open_score"
+            if not result.title and result.plan is not None:
+                result.title = result.plan.title
+        except Cancelled:
+            return Result(ok=False, intent="cancelled", error="cancelled",
+                          message="Stopped. Nothing was changed.",
+                          session_id=session.id if session else "",
+                          elapsed_ms=int((time.time() - started) * 1000))
         except Exception as exc:              # never crash the plugin
             import traceback
             return Result(ok=False, error=f"{type(exc).__name__}: {exc}",
                           message="Motif could not complete that request.",
                           analysis=traceback.format_exc(limit=3),
+                          session_id=session.id if session else "",
                           elapsed_ms=int((time.time() - started) * 1000))
+        result.elapsed_ms = int((time.time() - started) * 1000)
+        if session is not None:
+            result.session_id = session.id
+            session.add("musician", req.prompt)
+            session.add("motif", result.message, action=result.intent)
+            if result.title:
+                session.title = result.title
+            if result.plan is not None:
+                session.plan = json.loads(result.plan.to_json())
+            self.sessions.save(session)
+        return result
 
     # ------------------------------------------------------------------
     def _plan_for(self, req: Request, seed_hint: int | None = None) -> CompositionPlan:
@@ -150,16 +196,11 @@ class MotifAgent:
         if req.ensemble:
             plan.ensemble = req.ensemble
             plan.instruments = build_instruments(req.ensemble)
-        if self.planner is not None:
-            try:
-                plan = self.planner.refine(req.prompt, plan)
-            except Exception:
-                pass                          # the local plan is always usable
         return plan
 
     def _finish(self, plan: CompositionPlan, message: str,
                 warnings: list[str] | None = None) -> Result:
-        score = compose(plan, self.model, progress=self._progress)
+        score = compose(plan, self.model, progress=self.report)
         return Result(ok=True, message=message, musicxml=to_musicxml(score),
                       midi=to_midi(score), plan=plan, preview=summarise(score),
                       analysis=analyse(score).describe(), warnings=warnings or [])
@@ -247,7 +288,7 @@ class MotifAgent:
                                        style, rng, bars)
         _fit_section_bars(plan.sections, bars)
 
-        generated = compose(plan, self.model, progress=self._progress)
+        generated = compose(plan, self.model, progress=self.report)
         merged = _graft_melody(existing, generated)
         message = _voice.harmonized_message(
             plan, existing.title, bars, style, plan.sections[0].texture_lh, self.voice_model)

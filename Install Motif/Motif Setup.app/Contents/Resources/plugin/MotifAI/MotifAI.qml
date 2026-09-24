@@ -1,12 +1,16 @@
 //=============================================================================
 //  Motif.AI — your AI composing partner, inside MuseScore
 //
-//  Music arrives as MusicXML, which MuseScore imports far more faithfully than
-//  a plugin can build a score note by note: slurs, pedalling, hairpins,
-//  tuplets and multi-voice piano writing all survive intact.
+//  You describe the music; Motif's own composer, running on this computer,
+//  writes it the way a composer does — planning the form, inventing and
+//  developing its themes, trying ideas and keeping the best — and engraves
+//  it. Nothing is sent anywhere. Music arrives as MusicXML,
+//  which MuseScore imports far more faithfully than a plugin can build a
+//  score note by note: slurs, pedalling, hairpins, tuplets and multi-voice
+//  piano writing all survive intact.
 //=============================================================================
-import QtQuick 2.15
-import QtQuick.Layouts 1.15
+import QtQuick 2.9
+import QtQuick.Layouts 1.3
 import MuseScore 3.0
 import FileIO 3.0
 
@@ -17,9 +21,19 @@ import "js/theme.js" as T
 MuseScore {
     id: root
 
-    title: "Motif.AI"
+    // MuseScore Studio 4.4 and later read a plugin's title, thumbnail and
+    // category straight from this file, and read lines marked //4.4 as if
+    // the marker weren't there. MuseScore 3 has no such properties and
+    // refuses to load a plugin that sets one, so to it these stay comments.
+    //4.4 title: "Motif.AI"
+    //4.4 thumbnailName: "assets/thumbnail.png"
+    //4.4 categoryCode: "composing-arranging-tools"
+    // MuseScore 3 lists a plugin in its menu only under its menuPath, and
+    // titles its window with whatever follows the last full stop there, so
+    // the name is spelled with a one-dot leader (U+2024), which looks the same.
+    menuPath: "Plugins.Motif\u2024AI"
     description: "Your AI composing partner — describe a piece and Motif writes it."
-    version: "1.0.0"
+    version: "2.0.0"
     // MuseScore 4 dropped dockable plugin panels in its UI rewrite:
     // pluginType "dock" silently never opens there, which is why this has to
     // be a window. dockArea is kept for MuseScore 3, which still honours it
@@ -27,11 +41,10 @@ MuseScore {
     pluginType: "dialog"
     dockArea: "right"
     requiresScore: false
-    thumbnailName: "assets/thumbnail.png"
 
     // Tall and narrow, so it sits beside the score rather than over it.
-    implicitWidth: 380
-    implicitHeight: 820
+    implicitWidth: 400
+    implicitHeight: 840
     width: implicitWidth
     height: implicitHeight
 
@@ -42,9 +55,12 @@ MuseScore {
     property string versionText: ""
     property int wakeAttempts: 0
 
+    // -- the composer -----------------------------------------------------
+    // How much care it takes: how many ideas it tries before it settles.
+    property string composerQuality: "best"
+
     // -- preferences ------------------------------------------------------
-    // There is only ever one: whether a new score opens by itself. Composer
-    // and instrumentation are never settings — see the prompt box.
+    // Composer and instrumentation are never settings — see the prompt box.
     property bool autoOpen: true
 
     // -- session ----------------------------------------------------------
@@ -53,7 +69,13 @@ MuseScore {
     property bool settingsOpen: false
     property string lastPrompt: ""
     property int seedCounter: 0
+    property string sessionId: ""
+    property string jobId: ""
+    property bool stopping: false
     property string progressLabel: "Composing…"
+    property string progressDetail: ""
+    property real progressFraction: 0.0
+    property real progressElapsed: 0
 
     ListModel { id: conversation }
 
@@ -62,30 +84,51 @@ MuseScore {
     FileIO { id: scoreIn }
 
     readonly property var examples: [
-        { l1: "Compose a romantic piano piece",   l2: "in the style of Chopin",
-          prompt: "Compose a romantic piano piece in the style of Chopin" },
-        { l1: "Create a joyful and uplifting melody", l2: "in 6/8 time",
-          prompt: "Create a joyful and uplifting melody in 6/8 time" },
-        { l1: "Write a short film score",         l2: "for a mysterious forest scene",
-          prompt: "Write a short film score for a mysterious forest scene" },
-        { l1: "Continue this piece",              l2: "in a more dramatic way",
-          prompt: "Continue this piece in a more dramatic way" },
-        { l1: "Continue writing",                 l2: "in the same style",
-          prompt: "Continue in the same style" },
-        { l1: "Add a contrasting middle section", l2: "in a minor key",
-          prompt: "Add a contrasting middle section in a minor key" }
+        { l1: "A Rachmaninoff prelude",        l2: "in C♯ minor, with tolling bells and a great climax",
+          prompt: "Compose a Rachmaninoff-style piano prelude in C sharp minor, with tolling bells and a great climax" },
+        { l1: "A Chopin nocturne",             l2: "tender and singing, with ornamented returns",
+          prompt: "Write a nocturne in the style of Chopin, tender and singing, with ornamented returns of the theme" },
+        { l1: "A Mozart sonata movement",      l2: "Allegro, in sonata form",
+          prompt: "Compose the first movement of a piano sonata in the style of Mozart, Allegro in sonata form" },
+        { l1: "A Bach invention",              l2: "two voices, in D minor",
+          prompt: "Write a two-part invention in D minor in the style of Bach" },
+        { l1: "Continue my piece",             l2: "and build it to a climax",
+          prompt: "Continue the piece I have open, developing its ideas and building to a climax" },
+        { l1: "Arrange this for string quartet", l2: "keeping the melody in the first violin",
+          prompt: "Arrange the piece I have open for string quartet, keeping the melody in the first violin" }
     ]
 
     //=========================================================================
     //  Lifecycle
     //=========================================================================
+    // MuseScore calls onRun when the panel is opened. MuseScore 3 also
+    // creates every plugin once at startup just to read its name and
+    // version, then destroys it, so the start is deferred to the event loop
+    // where that throwaway copy never arrives, and it only ever runs once.
     onRun: start()
-    Component.onCompleted: start()
+    Component.onCompleted: deferredStart.start()
+    property bool started: false
+
+    Timer {
+        id: deferredStart
+        interval: 0
+        repeat: false
+        onTriggered: root.start()
+    }
 
     function start() {
+        if (root.started)
+            return;
+        root.started = true;
         loadSettings();
+        if (!root.sessionId.length)
+            root.sessionId = newSessionId();
         wakeAttempts = 0;
         checkHealth();
+    }
+
+    function newSessionId() {
+        return "s" + Date.now().toString(36) + Math.floor(Math.random() * 1e8).toString(36);
     }
 
     function motifFolder() {
@@ -129,19 +172,9 @@ MuseScore {
         onTriggered: root.checkHealth()
     }
 
-    // While a piece is being written, this shows what Motif is actually
-    // doing — sketching the theme, developing it, engraving the result —
-    // instead of a plain "thinking" spinner with nothing behind it.
-    Timer {
-        id: progressTimer
-        interval: 450
-        repeat: true
-        running: root.busy
-        onTriggered: Api.progress(root.serverUrl, root.apiToken, function (res) {
-            if (res && res.ok === true && res.text)
-                root.progressLabel = res.text;
-        })
-        onRunningChanged: if (running) root.progressLabel = "Composing…"
+    function applyQuality(q) {
+        if (q)
+            root.composerQuality = q;
     }
 
     function checkHealth() {
@@ -152,6 +185,7 @@ MuseScore {
                 root.connState = "ready";
                 root.wakeAttempts = 0;
                 root.versionText = "Version " + res.version;
+                applyQuality(res.quality);
                 return;
             }
             root.wakeAttempts += 1;
@@ -164,6 +198,22 @@ MuseScore {
         });
     }
 
+    function refreshSettings() {
+        Api.settings(root.serverUrl, root.apiToken, function (res) {
+            if (res && res.ok === true)
+                applyQuality(res.quality);
+        });
+    }
+
+    function saveQuality(value) {
+        root.composerQuality = value;
+        Api.saveSettings(root.serverUrl, root.apiToken, { composer_quality: value },
+                         function (res) {
+            if (res && res.ok === true)
+                applyQuality(res.quality);
+        });
+    }
+
     //=========================================================================
     //  Composing
     //=========================================================================
@@ -172,8 +222,8 @@ MuseScore {
         return Math.floor(Math.random() * 1000000) + root.seedCounter;
     }
 
-    // Hand Motif whatever is open, so it can answer questions about it and
-    // carry on from it.
+    // Hand Motif whatever is open, so it can read it, discuss it and carry on
+    // from it.
     function currentScoreXml() {
         if (typeof curScore === "undefined" || curScore === null)
             return "";
@@ -190,21 +240,35 @@ MuseScore {
         }
     }
 
+    function recentHistory() {
+        var out = [];
+        for (var i = 0; i < conversation.count; ++i) {
+            var m = conversation.get(i);
+            if (m.role === "user")
+                out.push({ role: "musician", text: m.text });
+            else if (m.role === "assistant")
+                out.push({ role: "motif", text: m.text });
+        }
+        return out.slice(-12);
+    }
+
     function send(promptText, isRetry) {
         if (root.busy || promptText.trim().length === 0)
             return;
         root.lastPrompt = promptText;
         root.busy = true;
+        root.stopping = false;
         root.view = 1;
+        root.progressLabel = "Starting…";
+        root.progressDetail = "";
+        root.progressFraction = 0.0;
+        root.progressElapsed = 0;
         if (!isRetry)
             appendMessage("user", promptText, "", false);
         appendMessage("pending", "", "", false);
 
         // Neither the composer nor the instrumentation is ever a setting —
-        // both come from what you type, the same way you'd ask a person:
-        // "in the style of Chopin", "for a string quartet", "continue in the
-        // same style". When a score is open and you don't name different
-        // forces, Motif keeps whatever is already playing.
+        // both come from what you type, the same way you'd ask a person.
         var scorePath = "";
         try {
             if (typeof curScore !== "undefined" && curScore !== null)
@@ -212,58 +276,164 @@ MuseScore {
         } catch (e) { scorePath = ""; }
 
         var payload = { prompt: promptText, seed: nextSeed(),
-                        score_xml: currentScoreXml(), score_path: scorePath };
+                        score_xml: currentScoreXml(), score_path: scorePath,
+                        session_id: root.sessionId, history: recentHistory() };
 
-        Api.compose(root.serverUrl, root.apiToken, payload, function (res) {
-            root.busy = false;
-            removePending();
-            if (!res || res.ok !== true) {
-                if (res && res.offline) {
-                    root.connState = "offline";
-                    appendMessage("error",
-                        "Motif isn’t answering just now. Give it a moment and try again.",
-                        "", false);
-                } else {
-                    appendMessage("error",
-                        (res && res.error) ? res.error
-                                           : "Motif couldn’t finish that one. Try rewording it.",
-                        "", false);
-                }
+        Api.startJob(root.serverUrl, root.apiToken, payload, function (res) {
+            if (!res || res.ok !== true || !res.job_id) {
+                finishWithError(res);
                 return;
             }
-            root.connState = "ready";
-            appendMessage("assistant", res.message || "Done.",
-                          describe(res.plan), !!res.musicxml_path);
-            conversation.setProperty(conversation.count - 1, "xmlPath",
-                                     res.musicxml_path || "");
-            // A change to the piece already open must be shown right away
-            // regardless of the auto-open preference: leaving the old
-            // version on screen while the file underneath it has changed
-            // risks the musician's next save overwriting what Motif wrote.
-            if (res.same_file && res.musicxml_path)
-                openScore(res.musicxml_path, true);
-            else if (root.autoOpen && res.musicxml_path && res.musicxml_path.length)
-                openScore(res.musicxml_path, false);
+            root.jobId = res.job_id;
+            jobTimer.restart();
         });
     }
 
-    // A plain-language summary of the choices Motif made, shown on request.
-    function describe(plan) {
-        if (!plan)
-            return "";
+    // Composing with care takes minutes; the card shows the stage, what the
+    // composer is thinking about or which bar it is writing, and how far along.
+    Timer {
+        id: jobTimer
+        interval: 650
+        repeat: true
+        running: false
+        onTriggered: root.pollJob()
+    }
+
+    function pollJob() {
+        if (!root.jobId.length) {
+            jobTimer.stop();
+            return;
+        }
+        Api.job(root.serverUrl, root.apiToken, root.jobId, function (res) {
+            if (!res || res.ok !== true) {
+                if (res && res.offline) {
+                    jobTimer.stop();
+                    root.jobId = "";
+                    finishWithError(res);
+                }
+                return;              // a missed poll is not a failure
+            }
+            var p = res.progress || {};
+            root.progressLabel = p.label || root.progressLabel;
+            root.progressDetail = p.detail || "";
+            root.progressFraction = p.fraction || root.progressFraction;
+            root.progressElapsed = res.elapsed || 0;
+            if (res.state === "done") {
+                jobTimer.stop();
+                root.jobId = "";
+                finishWithResult(res.result);
+            } else if (res.state === "error" || res.state === "cancelled") {
+                jobTimer.stop();
+                root.jobId = "";
+                if (res.state === "cancelled") {
+                    root.busy = false;
+                    root.stopping = false;
+                    removePending();
+                    appendMessage("system", "Stopped. Nothing was changed.", "", false);
+                } else {
+                    finishWithError(res.result || { error: res.error });
+                }
+            }
+        });
+    }
+
+    function stopJob() {
+        if (!root.jobId.length || root.stopping)
+            return;
+        root.stopping = true;
+        Api.cancelJob(root.serverUrl, root.apiToken, root.jobId, function (res) { });
+    }
+
+    function finishWithError(res) {
+        root.busy = false;
+        root.stopping = false;
+        removePending();
+        if (res && res.offline) {
+            root.connState = "offline";
+            appendMessage("error",
+                "Motif isn’t answering just now. Give it a moment and try again.", "", false);
+            return;
+        }
+        var text = (res && (res.message || res.error))
+                   ? (res.message || res.error)
+                   : "Motif couldn’t finish that one. Try rewording it.";
+        appendMessage("error", text, "", false);
+    }
+
+    function finishWithResult(res) {
+        root.busy = false;
+        root.stopping = false;
+        removePending();
+        if (!res || res.ok !== true) {
+            finishWithError(res);
+            return;
+        }
+        root.connState = "ready";
+        if (res.session_id)
+            root.sessionId = res.session_id;
+        appendMessage("assistant", res.message || "Done.", describe(res),
+                      !!res.musicxml_path);
+        conversation.setProperty(conversation.count - 1, "xmlPath",
+                                 res.musicxml_path || "");
+        // A change to the piece already open must be shown right away
+        // regardless of the auto-open preference: leaving the old version on
+        // screen while the file underneath it has changed risks the
+        // musician's next save overwriting what Motif wrote.
+        if (res.same_file && res.musicxml_path)
+            openScore(res.musicxml_path, true);
+        else if (root.autoOpen && res.musicxml_path && res.musicxml_path.length)
+            openScore(res.musicxml_path, false);
+    }
+
+    // What Motif decided, shown on request: the plan and its working notes.
+    function describe(res) {
+        var plan = res.plan;
         var lines = [];
-        lines.push("Key         " + plan.key);
-        lines.push("Time        " + plan.time[0] + "/" + plan.time[1]);
-        lines.push("Tempo       " + plan.tempo
-                   + (plan.tempo_text ? "   " + plan.tempo_text : ""));
-        lines.push("Form        " + prettify(plan.form));
-        lines.push("Written for " + prettify(plan.ensemble));
-        lines.push("");
-        for (var i = 0; i < plan.sections.length; ++i) {
-            var s = plan.sections[i];
-            lines.push("  " + pad(s.label, 12) + pad(s.bars + " bars", 10) + s.key);
+        if (plan) {
+            if (plan.form)
+                lines.push("Form        " + plan.form);
+            if (plan.key)
+                lines.push("Key         " + plan.key);
+            if (plan.time)
+                lines.push("Time        " + plan.time[0] + "/" + plan.time[1]);
+            if (plan.tempo)
+                lines.push("Tempo       " + Math.round(plan.tempo)
+                           + (plan.tempo_text ? "   " + plan.tempo_text : ""));
+            if (plan.parts && plan.parts.length) {
+                var names = [];
+                for (var p = 0; p < plan.parts.length; ++p)
+                    names.push(plan.parts[p].name || plan.parts[p].instrument);
+                lines.push("Written for " + names.join(", "));
+            } else if (plan.ensemble) {
+                lines.push("Written for " + prettify(plan.ensemble));
+            }
+            if (plan.sections && plan.sections.length) {
+                lines.push("");
+                for (var i = 0; i < plan.sections.length; ++i) {
+                    var s = plan.sections[i];
+                    var span = s.first ? ("m" + s.first + "–" + s.last) : (s.bars + " bars");
+                    lines.push("  " + pad(span, 11) + (s.label || "") + (s.key ? "  · " + s.key : ""));
+                }
+            }
+        }
+        if (res.notes && res.notes.length) {
+            lines.push("");
+            lines.push("While composing");
+            for (var n = 0; n < res.notes.length; ++n)
+                lines.push("  · " + res.notes[n]);
+        }
+        if (res.elapsed_ms) {
+            lines.push("");
+            lines.push("Composed in " + clock(res.elapsed_ms / 1000));
         }
         return lines.join("\n");
+    }
+
+    function clock(seconds) {
+        var s = Math.max(0, Math.floor(seconds));
+        var m = Math.floor(s / 60);
+        var r = s % 60;
+        return m + ":" + (r < 10 ? "0" : "") + r;
     }
 
     function prettify(id) {
@@ -293,8 +463,8 @@ MuseScore {
             appendMessage("system", sameFile
                 ? "Motif updated your score, but couldn’t refresh the page on "
                   + "screen. Close and reopen it to see the change."
-                : "Your score is saved in the Motif folder in your Documents. "
-                  + "Open it from there if it didn’t appear.", "", false);
+                : "Your score is saved in the Motif folder (.motif/scores in your "
+                  + "home folder). Open it from there if it didn’t appear.", "", false);
         }
     }
 
@@ -313,9 +483,12 @@ MuseScore {
     }
 
     function newChat() {
+        if (root.busy)
+            return;
         conversation.clear();
         root.view = 0;
         root.lastPrompt = "";
+        root.sessionId = newSessionId();
         promptBox.clear();
     }
 
@@ -323,9 +496,8 @@ MuseScore {
         appendMessage("system",
             "Motif starts by itself when you sign in, so it is normally ready "
             + "whenever MuseScore is.<br><br>"
-            + "If it stays quiet, open <b>Motif Setup</b> from your Applications "
-            + "folder and choose <b>Repair</b>. That takes a few seconds and "
-            + "puts everything back.", "", false);
+            + "If it stays quiet, open <b>Motif Setup</b> and choose <b>Repair</b>. "
+            + "That takes a few seconds and puts everything back.", "", false);
         root.view = 1;
     }
 
@@ -348,11 +520,15 @@ MuseScore {
                 autoOpen: root.autoOpen
                 versionText: root.versionText
                 connected: root.connState === "ready"
-                onChanged: function (openAutomatically) {
-                    root.autoOpen = openAutomatically;
+                quality: root.composerQuality
+                // Values are read from the panel rather than taken from the
+                // signals: see the note on SettingsPanel.pickedQuality.
+                onChanged: {
+                    root.autoOpen = settings.autoOpen;
                     root.savePreferences();
                 }
                 onClosed: root.settingsOpen = false
+                onQualityChosen: root.saveQuality(settings.pickedQuality)
             }
         }
 
@@ -403,11 +579,13 @@ MuseScore {
                         busy: root.busy
                         interactive: !root.busy
                         visible: root.view === 0
-                        onSubmitted: function (value) { root.send(value, false); }
+                        placeholder: "Describe the music — a composer, a mood, a form, "
+                                     + "or what to do with the score you have open…"
+                        onSubmitted: root.send(promptBox.lastSubmitted, false)
                     }
 
                     Text {
-                        text: "Try these examples"
+                        text: "Try these"
                         color: T.textMuted
                         font.family: T.sans
                         font.pixelSize: T.fsSmall
@@ -463,7 +641,15 @@ MuseScore {
                                 }
                                 Component {
                                     id: pendingRow
-                                    Thinking { active: root.busy; label: root.progressLabel }
+                                    ComposingCard {
+                                        label: root.progressLabel
+                                        detail: root.progressDetail
+                                        fraction: root.progressFraction
+                                        elapsed: root.progressElapsed
+                                        stopping: root.stopping
+                                        canStop: root.jobId.length > 0
+                                        onStopRequested: root.stopJob()
+                                    }
                                 }
                             }
                         }
@@ -494,10 +680,13 @@ MuseScore {
                         leftMargin: T.pad; rightMargin: T.pad
                         topMargin: T.pad * 0.6
                     }
-                    placeholder: "Ask for a change, or something new…"
+                    placeholder: "Ask for a change, more music, or something new…"
                     busy: root.busy
                     interactive: !root.busy
-                    onSubmitted: function (value) { root.send(value, false); followUp.clear(); }
+                    onSubmitted: {
+                        root.send(followUp.lastSubmitted, false);
+                        followUp.clear();
+                    }
                 }
             }
 
@@ -515,6 +704,7 @@ MuseScore {
                 Row {
                     anchors.centerIn: parent
                     spacing: 9
+                    opacity: root.busy ? 0.4 : 1.0
                     PhraseMark {
                         width: 20; height: 9
                         color: newChatArea.containsMouse ? T.gold : T.goldDim
@@ -534,7 +724,7 @@ MuseScore {
                     id: newChatArea
                     anchors.fill: parent
                     hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
+                    cursorShape: root.busy ? Qt.ArrowCursor : Qt.PointingHandCursor
                     onClicked: root.newChat()
                 }
             }
@@ -566,7 +756,7 @@ MuseScore {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: root.settingsOpen = true
+                onClicked: { root.settingsOpen = true; root.refreshSettings(); }
             }
         }
     }

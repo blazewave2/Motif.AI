@@ -1,6 +1,6 @@
 // Connection state.  A plugin that silently fails is worse than one that says
 // exactly what is wrong and how to fix it, so this strip is explicit.
-import QtQuick 2.15
+import QtQuick 2.9
 
 import "../js/theme.js" as T
 

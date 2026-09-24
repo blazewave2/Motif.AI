@@ -1,7 +1,8 @@
 // One turn in the conversation.  User turns are compact and right-weighted;
 // Motif's turns carry the score summary and the actions that follow from it.
-import QtQuick 2.15
+import QtQuick 2.9
 
+import "../js/text.js" as Txt
 import "../js/theme.js" as T
 
 Item {
@@ -62,7 +63,10 @@ Item {
 
             Text {
                 width: parent.width
-                text: bubble.text
+                // The panel's own notes carry deliberate markup; everything
+                // else (the musician's words, Motif's replies)
+                // is text, shown safely.
+                text: bubble.role === "system" ? bubble.text : Txt.rich(bubble.text)
                 color: T.text
                 font.family: T.sans
                 font.pixelSize: T.fsBody

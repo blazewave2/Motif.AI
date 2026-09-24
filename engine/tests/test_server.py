@@ -19,8 +19,7 @@ def server(tmp_path, monkeypatch):
     monkeypatch.setattr(app_module, "OUT_DIR", tmp_path / ".motif" / "scores")
     app_module.OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    cfg = {"token": "", "port": 0, "model_path": "", "anthropic_api_key": "",
-          "planner": "off"}
+    cfg = {"token": "", "port": 0, "model_path": "", "composer_quality": "sketch"}
     state = MotifState(cfg)
     Handler.state = state
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)

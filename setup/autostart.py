@@ -213,6 +213,12 @@ def install() -> str:
     return _install_linux()
 
 
+def install_starts_engine() -> bool:
+    """Whether :func:`install` launches the engine itself (launchd's
+    RunAtLoad on macOS, the startup script on Windows)."""
+    return platform.system() in ("Darwin", "Windows")
+
+
 def remove() -> None:
     system = platform.system()
     if system == "Darwin":
