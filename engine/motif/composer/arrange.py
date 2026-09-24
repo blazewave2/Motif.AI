@@ -344,6 +344,19 @@ def _line(composer, written, chords, p: PartDef, phrase_at, bar: F, beat: F) -> 
                 m = _fit(m, p.low, p.high)
                 if m is None:
                     continue
+                if p.role == "tenor" and motion == "hold" and \
+                        w.spec.texture in ("nocturne", "sweep", "sweep16") and c.dur >= beat:
+                    # the piano's flowing left hand, given to the viola as broken chords
+                    tones = [x for x in range(m, min(p.high, m + 12) + 1) if x % 12 in h.pcs]
+                    wave = (tones[:3] + tones[1:2]) if len(tones) >= 3 else [m]
+                    t, k = c.onset, 0
+                    step = beat / 2 if beat == 1 else beat / 3
+                    while t < c.onset + c.dur:
+                        d = min(step, c.onset + c.dur - t)
+                        v.add(Note(t, d, [spell(wave[k % len(wave)], h)]))
+                        t += step
+                        k += 1
+                    continue
                 for on, d in _pulse(c.onset, c.dur, beat, motion):
                     v.add(Note(on, d, [spell(m, h)]))
             elif p.role in ("bass", "bass8", "bass_w"):

@@ -267,3 +267,18 @@ def test_a_musicians_melody_is_harmonised_and_kept_exactly():
     lh = [n for m in out.parts[0].measures for v in m.voices.values() for n in v
           if n.pitches and n.staff == 2]
     assert len(lh) >= 16
+
+
+def test_an_open_piece_can_be_arranged_for_other_forces():
+    from motif.agent.agent import MotifAgent, Request
+    from motif.engrave.musicxml_reader import read_musicxml
+    agent = MotifAgent(options={"quality": "sketch"})
+    src = agent.run(Request(prompt="A Chopin nocturne in E flat major, 16 bars", seed=4))
+    out = agent.run(Request(prompt="Arrange the piece I have open for string quartet, keeping "
+                                   "the melody in the first violin", score_xml=src.musicxml,
+                            seed=5))
+    assert out.ok and out.intent == "arrange", out.error
+    score = read_musicxml(out.musicxml)
+    assert [p.name for p in score.parts] == ["Violin I", "Violin II", "Viola", "Violoncello"]
+    original = read_musicxml(src.musicxml)
+    assert score.measure_count == original.measure_count

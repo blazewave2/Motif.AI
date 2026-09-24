@@ -377,6 +377,8 @@ def motif_score(m: Motif, style: MelodyStyle) -> float:
     durs = list(m.rhythm) + list(m.second)
     values = set(durs)
     s += 1.0 * min(len(values), 3)
+    if m.second and list(m.second) == list(m.rhythm):
+        s -= 1.0              # the idea's second bar answers its first, not echoes it
     if len(m.rhythm) > 6 and style.cells not in ("motoric", "galant"):
         s -= 1.5
     if len(m.rhythm) <= 1:

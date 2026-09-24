@@ -31,7 +31,7 @@ from .prompt_parser import ENSEMBLE_WORDS, parse_prompt, parse_key
 from .prompt_parser import _detect as _detect_ensemble
 from . import voice as _voice
 
-INTENTS = ("create", "continue", "develop", "harmonize", "edit", "analyze")
+INTENTS = ("create", "continue", "develop", "harmonize", "arrange", "edit", "analyze")
 
 _CONTINUE_WORDS = ("continue", "carry on", "keep going", "keep writing",
                    "keep composing", "extend", "add more", "what comes next",
@@ -43,6 +43,9 @@ _CONTINUE_WORDS = ("continue", "carry on", "keep going", "keep writing",
                    "consistent with this", "keep it in the same")
 _DEVELOP_WORDS = ("develop", "vary", "variation", "elaborate", "expand on",
                   "build on", "take this", "rework", "reimagine")
+_ARRANGE_WORDS = ("arrange", "orchestrate", "score this for", "score it for", "rewrite this for",
+                  "rewrite it for", "transcribe this for", "transcribe it for", "set this for",
+                  "make this a string quartet", "turn this into a")
 _HARMONIZE_WORDS = ("harmonize", "harmonise", "add accompaniment", "accompany",
                     "add chords", "add a left hand", "add bass", "add harmony")
 _EDIT_WORDS = ("transpose", "make it", "change the", "slower", "faster", "louder",
@@ -109,6 +112,8 @@ class MotifAgent:
             return "analyze" if has_score else "create"
         if not has_score:
             return "create"
+        if any(w in t for w in _ARRANGE_WORDS) and _ensemble_named_in(prompt):
+            return "arrange"
         if any(w in t for w in _HARMONIZE_WORDS):
             return "harmonize"
         if any(w in t for w in _CONTINUE_WORDS):
@@ -157,6 +162,7 @@ class MotifAgent:
             handler = {
                 "create": self._create, "continue": self._continue,
                 "develop": self._develop, "harmonize": self._harmonize,
+                "arrange": self._arrange,
                 "edit": self._edit, "analyze": self._analyze,
             }[intent]
             result = handler(req, existing, info)
@@ -330,6 +336,35 @@ class MotifAgent:
         return Result(ok=True, message=message,
             musicxml=to_musicxml(merged), midi=to_midi(merged), plan=plan,
             preview=summarise(merged), analysis=analyse(merged).describe(), notes=notes)
+
+    def _arrange(self, req: Request, existing: Score, info: ScoreAnalysis) -> Result:
+        """The piece on the page, scored for other forces: its tune kept, its
+        harmony worked out beneath it, its parts written for the instruments."""
+        ensemble = req.ensemble or _ensemble_named_in(req.prompt) or "string_quartet"
+        from ..composer import arrange as arr
+        if not arr.supported(ensemble) or ensemble == "solo_piano":
+            return self._harmonize(req, existing, info)
+        from ..compose.styles import match_styles
+        named = match_styles(req.prompt.lower())
+        plan = self._plan_for(req)
+        style = resolve_style(req.style or (plan.style if named else info.detected_style))
+        from ..composer.harmonize import arrange_score
+        score, notes, _composer = arrange_score(
+            existing, ensemble, style.name, quality=self.options.get("quality", "best"),
+            progress=self.report, seed=plan.seed, title=existing.title)
+        forces = _voice._forces(ensemble)
+        bars = score.measure_count
+        lead = next((p for p in arr.ENSEMBLE_PARTS[ensemble] if p.role in ("lead", "organ",
+                                                                          "guitar", "keys")),
+                    arr.ENSEMBLE_PARTS[ensemble][0])
+        message = (f"**{existing.title or 'Your piece'}**, arranged for {forces}: {bars} bars. "
+                   f"The tune is kept as you wrote it and given to the {lead.name}; the "
+                   f"harmony is worked out beneath it and the inner parts are led smoothly "
+                   f"under the melody.")
+        plan.ensemble = ensemble
+        return Result(ok=True, message=message, musicxml=to_musicxml(score),
+                      midi=to_midi(score), plan=plan, preview=summarise(score),
+                      analysis=analyse(score).describe(), notes=notes)
 
     def _edit(self, req: Request, existing: Score, info: ScoreAnalysis) -> Result:
         """Direct transformations of the score that is already there."""
