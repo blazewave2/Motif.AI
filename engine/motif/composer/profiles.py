@@ -27,6 +27,7 @@ class Profile:
     rubato: float = 0.2                # how much the tempo breathes at cadences
     ornaments: float = 0.1
     octave_climax: bool = False        # double the melody in octaves at the climax
+    planing: bool = False              # returns harmonise the tune in parallel chords
     bass_low: int = 31
     minor_bias: float = 0.5
     phrase: str = "sentence"           # preferred theme structure: sentence | period
@@ -164,12 +165,12 @@ _add(Profile("debussy", "Debussy", "impressionist", "impressionist",
              pedal="harmony", dynamics=("pp", "mf"), climax_dynamic="f", rubato=0.2,
              genres=("prelude", "arabesque", "reverie", "clair de lune"),
              words={"theme": "doux et expressif", "contrast": "un peu animé"},
-             intro=0.5, language="fr", lean="slow"))
+             intro=0.5, language="fr", lean="slow", planing=True))
 _add(Profile("ravel", "Ravel", "impressionist", "impressionist",
              {"theme": ["sustained", "sweep"], "contrast": ["sweep16"], "climax": ["block"],
               "return": ["sustained"], "closing": ["sustained"]},
              pedal="harmony", dynamics=("pp", "f"), climax_dynamic="f", rubato=0.15,
-             intro=0.5, language="fr"))
+             intro=0.5, language="fr", planing=True))
 _add(Profile("satie", "Satie", "impressionist", "impressionist",
              {"theme": ["waltz"], "contrast": ["waltz"], "climax": ["waltz"],
               "return": ["waltz"], "closing": ["sustained"]},

@@ -228,7 +228,8 @@ def _ternary(prof: Profile, key: Key, bars: int, rng: random.Random, character: 
                             p.kind, p.bars, key, "PAC" if last else p.cadence,
                             0.95 if grand else 0.5,
                             _tex(prof, "climax" if grand else "return", rng, tx),
-                            recall=src, variation="octaves" if grand else "ornament",
+                            recall=src, variation="octaves" if grand else
+                            ("planing" if prof.planing else "ornament"),
                             new_section=(j == 0),
                             words=words.get("climax" if grand else "return", "")))
     # the return's cadence is sometimes evaded — a deceptive cadence — and the

@@ -411,7 +411,9 @@ def _title_bucket(moods: dict[str, float], key: Key) -> str:
 
 def _title(text: str, key: Key, form: str, style_display: str, rng: random.Random,
            moods: dict[str, float] | None = None) -> str:
-    quoted = re.search(r"(?:called|titled|named)\s+[\"']?([\w \-']{2,40})[\"']?", text)
+    quoted = re.search(r"(?:called|titled|named)\s+[\"'“‘]([^\"'”’]{2,60})[\"'”’]", text) or \
+        re.search(r"(?:called|titled|named)\s+([\w \-']{2,40}?)"
+                  r"(?=$|[,.;:!?]|\s+(?:in|for|with|by|at|that|which|and|like|using)\b)", text)
     if quoted:
         return quoted.group(1).strip().title()
     formal = {"concerto": "Concerto", "sonata": "Sonata", "fugue": "Fugue",

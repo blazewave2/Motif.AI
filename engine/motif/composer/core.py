@@ -88,6 +88,7 @@ class Composer:
         self.key = Key.parse(plan.key)
         self.genre = form or detect_genre(plan.prompt) or plan.form
         self.family = genre_family(self.genre)
+        _retitle(plan, self.genre, named=bool(detect_genre(plan.prompt)) and not form)
         if getattr(plan, "time_given", False) or not plan.prompt:
             self.time = tuple(plan.time)
         else:
@@ -424,6 +425,8 @@ class Composer:
                 fill = "full" if ps.role == "climax" else "octaves"
             elif ps.role == "climax" and prof.octave_climax:
                 fill = "octaves"
+            elif ps.variation == "planing":
+                fill = "planing"
             prev_h = written[wi - 1].harmony[-1] if wi and written[wi - 1].harmony else None
             _melody_to_voice(rh, w.melody, fill, w.harmony, w.start, prev_h)
         _group_tuplets(rh.notes)
@@ -807,12 +810,31 @@ def _chord_fill(p: Pitch, h: Harmony, octave: bool, inner: bool) -> list[Pitch]:
     return out
 
 
+def _planed(p: Pitch, m: MelNote, h: Harmony) -> list[Pitch]:
+    """Debussy's planing: the tune's longer notes carried by a chord of the
+    same shape under each — thirds stacked down the scale — so the harmony
+    moves in parallel with the melody."""
+    from .melody import _transpose_steps
+    if m.dur < F(1, 2):
+        return [p]
+    notes = [m.midi]
+    for k in (2, 4, 6):
+        notes.append(_transpose_steps(m.midi, -k, h.key))
+    notes = [x for x in notes if m.midi - x <= 11]
+    out = [spell(x, h) for x in sorted(set(notes)) if x != m.midi] + [p]
+    return sorted(out, key=lambda x: x.midi)
+
+
 def _melody_to_voice(rh: Voice, melody: list[MelNote], fill: str, harmony: list[Harmony],
                      start: F, prev_h: Harmony | None) -> None:
     for m in sorted(melody, key=lambda n: n.onset):
         p = m.pitch or Pitch.build("C", 0, 4)
         pitches = [p]
-        if fill:
+        if fill == "planing":
+            h = prev_h if (m.onset < start and prev_h is not None) else \
+                harmony_at(harmony, m.onset)
+            pitches = _planed(p, m, h)
+        elif fill:
             h = prev_h if (m.onset < start and prev_h is not None) else \
                 harmony_at(harmony, m.onset)
             pitches = sorted(_chord_fill(p, h, octave=True,
@@ -988,6 +1010,46 @@ def _final_marks(rh: Voice, lh: Voice, rh2: Voice, end: F, bar: F) -> None:
                 n.marks = list(n.marks) + ["fermata"]
     rh.marks.append(Mark(end - bar * 2, "above", "rit."))
     lh.marks.append(Mark(end, "pedup"))
+
+
+#: How each kind of piece is named in a title.
+_GENRE_TITLES = {
+    "consolation": "Consolation", "elegie": "Élégie", "élégie": "Élégie", "elegy": "Elegy",
+    "romance": "Romance", "etude-tableau": "Étude-tableau", "étude-tableau": "Étude-tableau",
+    "etude tableau": "Étude-tableau", "lyric piece": "Lyric Piece",
+    "gymnopedie": "Gymnopédie", "gymnopédie": "Gymnopédie", "gnossienne": "Gnossienne",
+    "song without words": "Song without Words", "moment musical": "Moment musical",
+    "berceuse": "Berceuse", "barcarolle": "Barcarolle", "reverie": "Rêverie",
+    "rêverie": "Rêverie", "liebestraum": "Liebestraum", "arabesque": "Arabesque",
+    "fantasy": "Fantasy", "fantasia": "Fantasia", "sonatina": "Sonatina",
+    "minuet": "Minuet", "menuet": "Menuet", "gavotte": "Gavotte", "sarabande": "Sarabande",
+    "gigue": "Gigue", "toccata": "Toccata", "polonaise": "Polonaise", "valse": "Valse",
+    "nocturne": "Nocturne", "prelude": "Prelude", "prélude": "Prélude", "waltz": "Waltz",
+    "mazurka": "Mazurka", "etude": "Étude", "étude": "Étude", "study": "Study",
+    "sonata": "Sonata", "invention": "Invention", "fugue": "Fugue", "ballade": "Ballade",
+    "rhapsody": "Rhapsody", "scherzo": "Scherzo", "intermezzo": "Intermezzo",
+    "impromptu": "Impromptu", "concerto": "Concerto",
+}
+_FORMAL = ("Concerto", "Sonata", "Fugue", "Invention", "Waltz", "Nocturne", "Prelude",
+           "Étude", "Rondo", "Mazurka", "Scherzo", "Ballade", "Rhapsody", "Intermezzo",
+           "Impromptu", "Variations")
+
+
+def _retitle(plan: CompositionPlan, genre: str, named: bool = False) -> None:
+    """A title that names a different kind of piece from the one being
+    written ("Étude in D♭" for a consolation) is corrected, a piece the
+    musician asked for by name is called by that name, and keys are written
+    with real sharps and flats."""
+    import re
+    name = _GENRE_TITLES.get((genre or "").lower())
+    title = plan.title or ""
+    head = title.split(" in ", 1)[0]
+    user_titled = bool(re.search(r"\b(called|titled|named)\b", (plan.prompt or "").lower()))
+    if name and not user_titled and (
+            (head in _FORMAL and head != name and " in " in title) or
+            (named and head not in _FORMAL)):
+        plan.title = f"{name} in {plan.key}"
+    plan.title = re.sub(r"\b([A-G])b\b", "\\1♭", re.sub(r"\b([A-G])#", "\\1♯", plan.title))
 
 
 def compose_plan(plan: CompositionPlan, *, quality: str = "best", progress=None) -> Score:
