@@ -57,6 +57,8 @@ class CompositionPlan:
     time: tuple[int, int] = (4, 4)
     tempo: int = 100
     tempo_text: str = ""
+    tempo_given: bool = False            # the request named a tempo
+    time_given: bool = False             # the request named a metre
     form: str = "ternary"
     sections: list[SectionPlan] = field(default_factory=list)
     instruments: list[InstrumentPlan] = field(default_factory=list)

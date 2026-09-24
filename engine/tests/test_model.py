@@ -47,6 +47,7 @@ def test_decoder_survives_malformed_sequences():
 
 def test_transposition_augmentation_shifts_key_and_pitch():
     import sys, pathlib
+    pytest.importorskip("numpy")      # the training tools need it; the engine does not
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "training"))
     from prepare import transpose_tokens, _shift_fifths
 

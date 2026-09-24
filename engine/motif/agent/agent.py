@@ -12,6 +12,8 @@ import time
 from dataclasses import dataclass, field
 
 from ..compose.composer import compose
+from ..composer import arrange as _arrange
+from ..composer.core import Composer
 from ..control import Cancelled
 from ..compose.forms import build_sections
 from ..compose.orchestration import INSTRUMENTS, build_instruments
@@ -198,18 +200,42 @@ class MotifAgent:
             plan.instruments = build_instruments(req.ensemble)
         return plan
 
-    def _finish(self, plan: CompositionPlan, message: str,
+    def _compose(self, plan: CompositionPlan) -> tuple[Score, list[str], dict]:
+        """Motif's composer writes the piece; concertos, which it does not
+        yet score, still go to the earlier engine."""
+        ensemble = plan.ensemble or "solo_piano"
+        if not plan.movements and (ensemble == "solo_piano" or _arrange.supported(ensemble)):
+            composer = Composer(plan, quality=self.options.get("quality", "best"),
+                                progress=self.report)
+            score = composer.compose()
+            plan.tempo = int(composer.tempo)
+            plan.tempo_text = composer.tempo_text
+            plan.time = tuple(composer.time)
+            return score, list(composer.notes), dict(composer.summary)
+        return compose(plan, self.model, progress=self.report), [], {}
+
+    def _finish(self, plan: CompositionPlan, message,
                 warnings: list[str] | None = None) -> Result:
-        score = compose(plan, self.model, progress=self.report)
+        """Compose ``plan``. ``message`` is the reply, or a function of the
+        plan and what the composer decided that writes it."""
+        score, notes, summary = self._compose(plan)
+        if callable(message):
+            message = message(plan, summary)
         return Result(ok=True, message=message, musicxml=to_musicxml(score),
                       midi=to_midi(score), plan=plan, preview=summarise(score),
-                      analysis=analyse(score).describe(), warnings=warnings or [])
+                      analysis=analyse(score).describe(), warnings=warnings or [],
+                      notes=notes)
 
     # -- intents --------------------------------------------------------
     def _create(self, req: Request, existing, info) -> Result:
         plan = self._plan_for(req)
         style = resolve_style(plan.style)
-        return self._finish(plan, _voice.created_message(plan, style, self.voice_model))
+
+        def message(p: CompositionPlan, summary: dict) -> str:
+            if summary:
+                return _voice.composed_message(p, summary, self.voice_model)
+            return _voice.created_message(p, style, self.voice_model)
+        return self._finish(plan, message)
 
     def _continue(self, req: Request, existing: Score, info: ScoreAnalysis) -> Result:
         """Add new music that follows on from what is already written."""

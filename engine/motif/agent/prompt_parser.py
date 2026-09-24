@@ -297,6 +297,7 @@ def parse_prompt(prompt: str, *, seed: int | None = None,
 
     # -- metre -------------------------------------------------------------
     met = _METER_RE.search(text)
+    time_given = bool(met)
     if met:
         time = (int(met.group(1)), int(met.group(2)))
     elif form in ("waltz", "mazurka", "minuet") or "waltz" in text:
@@ -323,6 +324,7 @@ def parse_prompt(prompt: str, *, seed: int | None = None,
                 bpm = v
                 tempo_text = words[0].title()
                 break
+    tempo_given = bpm is not None
     if bpm is None:
         lo, hi = style.tempo_range
         bpm = int(lo + (hi - lo) * (0.35 + rng.random() * 0.3))
@@ -348,6 +350,7 @@ def parse_prompt(prompt: str, *, seed: int | None = None,
         title=_title(text, key, form, style.display, rng, moods),
         subtitle=_subtitle(ensemble, style),
         style=style.name, key=str(key), time=time, tempo=bpm, tempo_text=tempo_text,
+        tempo_given=tempo_given, time_given=time_given,
         form=form, sections=sections, instruments=instruments,
         seed=rng.randint(1, 2 ** 30), prompt=prompt, character=character,
         ensemble=ensemble)
