@@ -39,13 +39,14 @@ class Care:
     harmony_tries: int
     beam: int
     melody_takes: int
+    auditions: int = 1           # themes tried out in a real phrase before one is chosen
 
 
 CARE = {
-    "sketch": Care(8, 4, 6, 1),
-    "balanced": Care(16, 8, 10, 2),
-    "best": Care(32, 16, 16, 4),
-    "maximum": Care(64, 32, 24, 8),
+    "sketch": Care(8, 4, 6, 1, 1),
+    "balanced": Care(16, 8, 10, 2, 2),
+    "best": Care(32, 16, 16, 4, 3),
+    "maximum": Care(64, 32, 24, 8, 5),
 }
 
 _DYNAMICS = ["ppp", "pp", "p", "mp", "mf", "f", "ff", "fff"]
@@ -144,8 +145,10 @@ class Composer:
 
         self._say("themes", "Inventing the themes" if self.theme is None else
                   "Listening to your theme", "", 0.06)
-        motif = self.theme.motif if self.theme is not None else \
-            invent_motif(mstyle, self.time, self.rng, self.care.motifs, plan.character)
+        if self.theme is not None:
+            motif = self.theme.motif
+        else:
+            motif = self._audition(form, hstyle, mstyle)
         contrast = invent_contrast(mstyle, motif, self.time, self.rng, self.care.motifs)
         writers = {
             "A": MelodyWriter(mstyle, motif, self.rng, beam=self.care.beam, time=self.time),
@@ -201,6 +204,45 @@ class Composer:
                                "character": plan.character, "ensemble": self.ensemble})
         self.msn = msn
         return score
+
+    def _audition(self, form: FormPlan, hstyle, mstyle) -> Motif:
+        """Several candidate themes, each written out as the piece's opening
+        phrase; the one whose phrase is best — by the search's own cost and
+        by a whole-phrase judgement — becomes the theme. A motif can look
+        fine on paper and make a dull phrase."""
+        first = next((p for p in form.phrases if p.role == "theme" and
+                      p.kind in ("sentence", "antecedent")), None)
+        candidates = [invent_motif(mstyle, self.time, self.rng, self.care.motifs,
+                                   self.plan.character)
+                      for _ in range(max(1, self.care.auditions))]
+        if first is None or len(candidates) == 1:
+            return candidates[0]
+        best, best_score = candidates[0], -1e18
+        for k, cand in enumerate(candidates):
+            self._say("themes", "Trying out themes", f"theme {k + 1} of {len(candidates)}",
+                      0.03 + 0.05 * k / len(candidates))
+            trial_rng = random.Random(self.rng.random())
+            saved = self.rng
+            self.rng = trial_rng
+            try:
+                writer = MelodyWriter(mstyle, cand, trial_rng, beam=max(6, self.care.beam // 2),
+                                      time=self.time)
+                w = self._phrase(first, F(0), hstyle, mstyle, writer, None, [], F(0), F(0),
+                                 final=False)
+            finally:
+                self.rng = saved
+            if not w.melody:
+                continue
+            roles = roles_for(first.kind, first.bars)
+            pp = PhrasePlan(start=F(0), bars=first.bars, bar_len=self.bar, time=self.time,
+                            key=first.key, harmony=w.harmony, cadence=first.cadence,
+                            bar_roles=roles)
+            score = judge_melody(w.melody, pp) - 0.12 * writer.last_cost + \
+                0.3 * motif_score(cand, mstyle)
+            if score > best_score:
+                best, best_score = cand, score
+        self.responses.clear()            # the trials' choices are not the piece's
+        return best
 
     def _summarise(self, written: list[Written], form: FormPlan, end: F, motif: Motif,
                    contrast: Motif) -> dict:
