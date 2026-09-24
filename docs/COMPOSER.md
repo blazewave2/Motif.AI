@@ -63,11 +63,15 @@ A theme starts as a two-bar idea: a rhythm drawn from the style's rhythm
 cells and a contour in scale steps. Many candidates are invented and scored
 for character — a long note and a short one, a leap filled in by steps the
 other way, one high point that is held rather than passed through, a range of
-about a fifth, no trilling back and forth — and for the harmony they imply:
-each candidate is tried starting on the tonic, third and fifth, with its
-second bar over the tonic, subdominant or dominant, and kept only if its
-long and accented notes are chord tones. The middle section gets its own
-theme, chosen to differ in rhythm and gesture.
+about a fifth, no trilling back and forth — for the mood asked for (drama
+rises by arpeggio in dotted rhythm, calm moves by step, play skips in short
+notes), and for the harmony they imply: each candidate is tried starting on
+the tonic, third and fifth, with its second bar over the tonic, subdominant
+or dominant, and kept only if its long and accented notes are chord tones.
+At higher care the best few are then *auditioned*: each is written out as
+the piece's opening phrase, and the theme whose phrase turns out best is
+the one the piece is built on. The middle section gets its own theme,
+chosen to differ in rhythm and gesture.
 
 ## Phrases
 
@@ -129,15 +133,30 @@ countersubject that is kept consonant with it. Every realiser voice-leads
 from the chord before, keeps under the melody, and keeps each hand inside
 its reach.
 
+## The shape of the whole
+
+The passage leading back to the theme sits on a dominant pedal and grows in
+one long crescendo into the climax; in Romantic pieces the returning theme's
+cadence is sometimes evaded — a deceptive cadence — and a short extension
+finds its way home before the coda. At cadences a flowing left hand may come
+to rest on a held chord so the phrase is heard to end. Some middle sections
+move the tune into the left hand, *sotto voce*, under soft repeated chords.
+Where the left hand leaves room, a lyrical phrase may gain a second, singing
+voice in the right hand — one long note to a chord, moving by step, with
+suspensions that fall to their resolutions.
+
 ## Performance
 
 Dynamics follow each phrase's energy; hairpins swell into the phrase's high
 point and away from it over a bar or two; slurs follow the breathing of the
-line; the pedal changes with the harmony. Romantic pieces hold back before
-each new section, broaden into the climax, move on in the middle section
-(*Più mosso*) and return to *Tempo I*. Returns in Chopin and Field are
-ornamented with grace notes, turns and the occasional run. The last bar is a
-held, rolled chord under a fermata.
+line (a two-bar gesture in Classical music, a whole line in Romantic); at a
+quick Classical tempo notes that leap or repeat are detached and the note
+before a full close takes a trill; the pedal changes with the harmony.
+Romantic pieces hold back before each new section, broaden into the climax,
+move on in the middle section (*Più mosso*) and return to *Tempo I*. Returns
+in Chopin and Field are ornamented with grace notes, turns and the
+occasional sextuplet run; Debussy's are carried in parallel chords. The last
+bar is a held, rolled chord under a fermata.
 
 ## Ensembles (`arrange.py`)
 
@@ -149,6 +168,29 @@ when it presses; the bass sings its own line; in an orchestra the winds
 double the strings as the music grows, and trumpets and timpani join only at
 its height. A piano accompanying a soloist keeps its left hand and gains
 chords in the right.
+
+## Concertos
+
+A piano concerto is a first movement in which every phrase knows who plays
+it. In the Romantic concerto the piano opens alone with tolling chords; the
+strings state the theme, violins and cellos an octave apart, while the piano
+ripples beneath; the piano sings the second theme over quiet strings and the
+orchestra takes it up; the development trades phrases; the theme returns at
+the climax with the whole orchestra and the piano's massive chords; a
+cadenza for the piano alone holds on the dominant; a coda brings everyone
+home. A Classical concerto opens with the orchestra's ritornello.
+
+## Working with the musician's own music
+
+*Continue* reads the opening of the tune already on the page (`listen.py`)
+and makes it the theme: the continuation develops it away from home, leads
+back, restates it and closes, in the page's own key, metre and tempo.
+*Develop* builds a new piece on it. *Harmonise* (`harmonize.py`) keeps the
+tune note for note and chooses a chord for every half bar by dynamic
+programming over the composer's vocabulary — fit to the tune, natural
+motion from chord to chord, a pause on the dominant every fourth bar and a
+close on the tonic — then lays out the accompaniment in the composer's
+idiom.
 
 ## Notation (`notation.py`)
 
