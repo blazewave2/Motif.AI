@@ -429,6 +429,30 @@ def sustained(h: Harmony, t0: F, dur: F, ctx: TextureContext) -> list[TexNote]:
     return [TexNote(t0, dur, [b] + tones)]
 
 
+def tenor(h: Harmony, t0: F, dur: F, ctx: TextureContext) -> list[TexNote]:
+    """The tune is in the left hand: the right hand keeps the harmony above
+    it in soft repeated chords, and the bass sounds on the downbeat wherever
+    the left hand can reach it from the tune."""
+    out: list[TexNote] = []
+    top = _melody_top(ctx, t0, t0 + dur) or 60
+    lo = max(top + 3, 60)
+    v = voicing(h, ctx, 3, lo, lo + 14, ctx.prev_voicing, max_span=10)
+    ctx.prev_voicing = v or ctx.prev_voicing
+    unit = ctx.beat if ctx.tempo * float(ctx.beat) >= 100 else ctx.beat / 2
+    t = t0
+    while t < t0 + dur and v:
+        d = min(unit, t0 + dur - t)
+        out.append(TexNote(t, d, list(v), staff="RH", voice=1,
+                           marks=["stacc"] if ctx.energy > 0.6 else []))
+        t += unit
+    b = bass_note(h, ctx)
+    ctx.prev_bass = b
+    low = _melody_low(ctx, t0, t0 + min(dur, ctx.beat))
+    if low is not None and 5 <= low - b <= 12:
+        out.append(TexNote(t0, min(dur, ctx.beat * 2), [b], staff="LH", voice=2))
+    return out
+
+
 def final_chord(h: Harmony, t0: F, dur: F, ctx: TextureContext) -> list[TexNote]:
     """The last chord of a piece, held: a deep octave with the fifth or
     tenth above it, rolled."""
@@ -450,7 +474,7 @@ REALISERS = {
     "nocturne": nocturne, "waltz": waltz, "alberti": alberti, "block": block,
     "bells": bells, "sweep": lambda h, t, d, c: sweep(h, t, d, c, True),
     "sweep16": lambda h, t, d, c: sweep(h, t, d, c, False), "repeated": repeated,
-    "sustained": sustained, "final": final_chord,
+    "sustained": sustained, "final": final_chord, "tenor": tenor,
 }
 
 

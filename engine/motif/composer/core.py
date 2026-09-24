@@ -308,6 +308,8 @@ class Composer:
         low, high, top = mstyle.low, mstyle.high, mstyle.climax_high
         if self.ensemble in _arrange.LEAD_RANGE:
             low, high, top = _arrange.LEAD_RANGE[self.ensemble]
+        if ps.register == "tenor" and self.ensemble == "solo_piano":
+            low, high, top = 48, 64, 67
         peak = int(round(low + (high - low) * (0.5 + 0.45 * ps.energy)))
         if roles and roles[0] == "idea":
             # room above the idea and its repeat for the phrase to climb past them
@@ -428,7 +430,8 @@ class Composer:
             elif ps.variation == "planing":
                 fill = "planing"
             prev_h = written[wi - 1].harmony[-1] if wi and written[wi - 1].harmony else None
-            _melody_to_voice(rh, w.melody, fill, w.harmony, w.start, prev_h)
+            _melody_to_voice(lh if ps.register == "tenor" else rh, w.melody, fill, w.harmony,
+                             w.start, prev_h)
         _group_tuplets(rh.notes)
         # the last melody note becomes a full chord
         _final_rh_chord(rh, written[-1], final_bar)
@@ -436,15 +439,27 @@ class Composer:
         for w in written:
             ps = w.spec
             if ps.role in ("theme", "return", "contrast") and ps.texture in _LH_ONLY and \
+                    ps.register != "tenor" and \
                     ps.variation != "octaves" and w.melody and \
                     self.rng.random() < prof.inner:
                 rh2.notes.extend(_inner_line(w, self.beat, final_bar))
 
         # -- the accompaniment, kept clear of the right hand
+        lh2 = Voice("LH2", secondary=True)
+        tenor_lines = Voice("tenor")
+        for w in written:
+            if w.spec.register == "tenor":
+                _melody_to_voice(tenor_lines, w.melody, "", w.harmony, w.start, None)
         ctx = TextureContext(self.time, self.bar, self.beat, self.key,
                              bass_low=prof.bass_low, rng=self.rng, tempo=float(self.tempo),
                              virtuoso=_virtuoso(prof))
         ctx.melody_floor, ctx.melody_top = _rh_extent(rh, self.bar, end)
+        if tenor_lines.notes:
+            t_low, t_top = _rh_extent(tenor_lines, self.bar, end)
+            for k, v in t_low.items():
+                ctx.melody_floor.setdefault(k, v)
+            for k, v in t_top.items():
+                ctx.melody_top.setdefault(k, v)
         for wi, w in enumerate(written):
             ps = w.spec
             ctx.key = ps.key
@@ -456,8 +471,16 @@ class Composer:
             if last:
                 h = harmony_at(w.harmony, final_bar)
                 tex += final_chord(h, final_bar, self.bar, ctx)
+            elif ps.cadence in ("PAC", "HC", "IAC", "plagal") and ps.texture in _FLOWING and \
+                    self.rng.random() < 0.45:
+                tex = _breathe(tex, w.harmony, span_end, self.bar, self.beat, ctx)
             w.texture = tex
-            _texture_to_voices(tex, w.harmony, lh, rh2)
+            if ps.register == "tenor":
+                # the right hand is free of the tune: its chords are the upper voice
+                _texture_to_voices([n for n in tex if n.staff == "RH"], w.harmony, rh, rh)
+                _texture_to_voices([n for n in tex if n.staff != "RH"], w.harmony, lh2, lh2)
+            else:
+                _texture_to_voices(tex, w.harmony, lh, rh2)
 
         # -- dynamics, words, phrasing and pedalling
         for wi, w in enumerate(written):
@@ -465,7 +488,7 @@ class Composer:
         self._tempo_changes(sheet, rh, written)
         _final_marks(rh, lh, rh2, end, self.bar)
         sheet.bar_info.setdefault(bars, BarInfo()).barline = "final"
-        sheet.voices = [rh, rh2, lh]
+        sheet.voices = [rh, rh2, lh] + ([lh2] if lh2.notes else [])
         return sheet
 
     def _ensemble_sheet(self, written: list[Written], end: F) -> Sheet:
@@ -853,6 +876,49 @@ def _melody_to_voice(rh: Voice, melody: list[MelNote], fill: str, harmony: list[
 #: second voice free.
 _LH_ONLY = ("nocturne", "sweep", "sweep16", "bells", "waltz", "alberti", "repeated", "walking",
             "sustained")
+
+
+#: Figurations that run on without a break — at a cadence they can stop to
+#: let the phrase breathe.
+_FLOWING = ("nocturne", "sweep", "sweep16", "alberti", "repeated")
+
+
+def _breathe(tex: list[TexNote], harmony: list[Harmony], end: F, bar: F, beat: F,
+             ctx: TextureContext) -> list[TexNote]:
+    """At a cadence the figuration comes to rest: the last half bar of the
+    phrase becomes its chord, held — the bass and the harmony above it — so
+    the end of the phrase is heard as an end."""
+    half = bar / 2 if bar >= 2 * beat else bar
+    beats = -(-half // beat)                  # whole beats, rounded up
+    cut = end - beat * beats
+    # never cut a triplet group in two: stop before any group that crosses
+    group_start = None
+    for n in sorted(tex, key=lambda x: x.onset):
+        if n.tuplet_start:
+            group_start = n.onset
+        if n.tuplet is not None and group_start is not None and n.onset < cut < n.onset + n.dur:
+            cut = group_start
+        if n.tuplet_stop:
+            if group_start is not None and group_start < cut < n.onset + n.dur:
+                cut = group_start
+            group_start = None
+    kept = [n for n in tex if n.onset < cut]
+    for n in kept:
+        if n.onset + n.dur > cut:
+            n.dur = cut - n.onset
+    h = harmony_at(harmony, cut)
+    lows = [m for n in tex if n.onset >= cut for m in n.midis]
+    if not lows:
+        return tex
+    b = min(lows)
+    top = min(b + 16, max(lows))
+    above = sorted({m for m in range(b + 3, top + 1) if m % 12 in h.pcs})
+    chord = [b] + [m for i, m in enumerate(above) if i < 2]
+    if chord[-1] - chord[0] > 16:
+        chord = [b]
+    kept.append(TexNote(cut, end - cut, chord, marks=["arp"] if chord[-1] - chord[0] > 10
+                        else []))
+    return kept
 
 
 def _inner_line(w: Written, beat: F, stop: F) -> list[Note]:
