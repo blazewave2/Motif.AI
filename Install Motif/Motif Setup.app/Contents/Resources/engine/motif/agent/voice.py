@@ -88,6 +88,143 @@ def created_message(plan: CompositionPlan, style, voice: VoiceModel | None = Non
     return _try_rewrite(voice, plain, {"kind": "create", "plan": plan})
 
 
+_TEXTURE_WORDS = {
+    "nocturne": ["a wide, rippling left hand spread over a tenth and more",
+                 "broken chords that ripple up from a deep bass"],
+    "sweep": ["sweeping triplet arpeggios in the left hand",
+              "left-hand arpeggios that sweep up two octaves and back"],
+    "sweep16": ["surging sixteenth-note arpeggios", "a torrent of sixteenth-note arpeggios"],
+    "bells": ["tolling bass octaves answered by chords", "bell-like octaves deep in the bass"],
+    "block": ["full, sustained chords", "rich chordal writing"],
+    "waltz": ["a waltz bass", "the lilt of a waltz accompaniment"],
+    "alberti": ["an Alberti bass", "a running Alberti accompaniment"],
+    "repeated": ["throbbing repeated chords", "pulsing repeated chords"],
+    "walking": ["a walking bass line", "a bass that walks beneath it"],
+    "sustained": ["open, pedalled harmonies", "still, open sonorities"],
+}
+_GENRE_NAMES = {"etude-tableau": "étude-tableau", "etude": "étude", "elegie": "élégie",
+                "gymnopedie": "gymnopédie", "lyric piece": "lyric piece"}
+
+
+def _texture_phrase(tex: str, rng: random.Random) -> str:
+    return rng.choice(_TEXTURE_WORDS.get(tex, ["a flowing accompaniment"]))
+
+
+def _bars(a: int, b: int) -> str:
+    return f"bar {a}" if a == b else f"bars {a}–{b}"
+
+
+def composed_message(plan: CompositionPlan, summary: dict,
+                     voice: VoiceModel | None = None) -> str:
+    """Describe a piece the way its composer would: what it is, how it opens,
+    where it goes and how it ends."""
+    rng = _rng_for(plan)
+    if not summary:
+        return f"Here's **{plan.title}**."
+    genre = summary.get("genre") or plan.form
+    genre = _GENRE_NAMES.get(genre, genre).replace("_", " ")
+    forces = _forces(summary.get("ensemble") or plan.ensemble)
+    key = summary.get("key", plan.key)
+    bars = summary.get("bars", plan.total_bars)
+    tempo_text = summary.get("tempo_text") or ""
+    num, den = summary.get("time", plan.time)
+    tempo = f"{tempo_text}, " if tempo_text else ""
+    tempo += f"{num}/{den}"
+    style = summary.get("style", "")
+    idiom = f" in the manner of {style}" if style and style.lower() not in (
+        "romantic", "classical", "cinematic") else ""
+    opener = rng.choice([
+        f"Here's **{plan.title}** — a {genre}{idiom} for {forces} in {key}, "
+        f"{bars} bars ({tempo}).",
+        f"I've written **{plan.title}**, a {genre}{idiom} for {forces} in {key}: "
+        f"{bars} bars, {tempo}.",
+        f"**{plan.title}** is ready: a {genre} for {forces}{idiom}, in {key}, "
+        f"{bars} bars ({tempo}).",
+    ])
+    lines = [opener]
+    secs = summary.get("sections", [])
+    story = []
+    th = summary.get("theme", {})
+    shape = th.get("shape", 0)
+    shape_word = "rising" if shape > 0 else "falling" if shape < 0 else "arching"
+    described: set[str] = set()
+    for sec in secs:
+        role, a, b = sec["role"], sec["start"], sec["end"]
+        if sec["texture"] in described:
+            tex = rng.choice(["the same accompaniment", "the accompaniment heard before"])
+        else:
+            tex = _texture_phrase(sec["texture"], rng)
+            described.add(sec["texture"])
+        forces = sec.get("forces", "")
+        if role == "intro" and forces == "solo":
+            story.append(f"It opens with the piano alone ({_bars(a, b)}) — tolling chords over "
+                         f"deep octaves, growing towards the orchestra's entry.")
+        elif role == "theme" and forces == "orch_lead":
+            story.append(f"The orchestra states the theme ({_bars(a, b)}), violins and cellos "
+                         f"an octave apart, while the piano ripples beneath it.")
+        elif role == "theme" and forces == "tutti":
+            story.append(f"The orchestra opens with the theme ({_bars(a, b)}) before the "
+                         f"soloist enters.")
+        elif role == "contrast" and forces == "solo_lead":
+            story.append(f"The piano sings the second theme in {sec['key']} ({_bars(a, b)}) over "
+                         f"quiet strings, and the orchestra takes it up in turn.")
+        elif role == "cadenza":
+            story.append(f"A cadenza for the piano alone ({_bars(a, b)}) holds on the dominant "
+                         f"before everyone returns for the coda.")
+        elif role == "climax" and forces == "tutti":
+            story.append(f"The theme returns at the climax ({_bars(a, b)}) with the full "
+                         f"orchestra and the piano's massive chords together.")
+        elif role == "intro":
+            story.append(f"It opens with {_bars(a, b)} of accompaniment alone — {tex}.")
+        elif role == "theme":
+            up = " that leans in from an upbeat" if th.get("upbeat") else ""
+            answer = {1: "answered a step higher", -1: "answered a step lower",
+                       2: "answered a third higher", -2: "answered a third lower",
+                       3: "answered a fourth higher", 4: "answered on the dominant",
+                       -3: "answered on the dominant", 0: "restated over new harmony"
+                       }.get(th.get("answer"), "developed")
+            story.append(f"The theme ({_bars(a, b)}) is a {shape_word} idea{up}, stated, "
+                         f"{answer}, then broken down towards its cadence, over {tex}.")
+        elif role == "contrast":
+            words = f", {sec['words']}," if sec.get("words") else ""
+            story.append(f"The middle section{words} moves to {sec['key']} ({_bars(a, b)}) "
+                         f"with a new, contrasting theme over {tex}.")
+        elif role == "transition":
+            if sec["key"] != key:
+                story.append(f"A short passage ({_bars(a, b)}) leads to {sec['key']}.")
+            else:
+                story.append(f"A short passage ({_bars(a, b)}) leads back home.")
+        elif role == "development":
+            story.append(f"{_bars(a, b).capitalize()} develop the opening idea in sequence "
+                         f"through {sec['key']}.")
+        elif role == "climax":
+            story.append(f"The theme returns at the climax ({_bars(a, b)}), in octaves over "
+                         f"{tex}.")
+        elif role == "return":
+            how = {"ornament": ", ornamented", "octaves": " in octaves"}.get(
+                sec.get("variation", ""), "")
+            story.append(f"The theme comes back{how} in {_bars(a, b)}.")
+        elif role == "closing" and forces == "tutti":
+            story.append(f"A coda for everyone ({_bars(a, b)}) brings it home in full voice.")
+        elif role == "closing":
+            story.append(f"A coda ({_bars(a, b)}) remembers the opening and settles.")
+    # merge duplicate sentences for repeated sections
+    seen, uniq = set(), []
+    for sentence in story:
+        k = sentence.split("(")[0]
+        if k in seen:
+            continue
+        seen.add(k)
+        uniq.append(sentence)
+    if uniq:
+        lines.append("\n\n" + " ".join(uniq))
+    if plan.character:
+        lines.append(rng.choice([f"\n\nI aimed for something {plan.character}.",
+                                 f"\n\nThe character throughout is {plan.character}."]))
+    plain = "".join(lines)
+    return _try_rewrite(voice, plain, {"kind": "create", "plan": plan, "summary": summary})
+
+
 def continued_message(plan: CompositionPlan, existing_title: str, bars: int,
                       info, voice: VoiceModel | None = None) -> str:
     rng = _rng_for(plan)

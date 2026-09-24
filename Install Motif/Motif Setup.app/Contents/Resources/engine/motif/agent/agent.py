@@ -12,6 +12,8 @@ import time
 from dataclasses import dataclass, field
 
 from ..compose.composer import compose
+from ..composer import arrange as _arrange
+from ..composer.core import Composer
 from ..control import Cancelled
 from ..compose.forms import build_sections
 from ..compose.orchestration import INSTRUMENTS, build_instruments
@@ -198,18 +200,44 @@ class MotifAgent:
             plan.instruments = build_instruments(req.ensemble)
         return plan
 
-    def _finish(self, plan: CompositionPlan, message: str,
-                warnings: list[str] | None = None) -> Result:
-        score = compose(plan, self.model, progress=self.report)
+    def _compose(self, plan: CompositionPlan, theme=None, form: str | None = None
+                 ) -> tuple[Score, list[str], dict]:
+        """Motif's composer writes the piece; concertos, which it does not
+        yet score, still go to the earlier engine."""
+        ensemble = plan.ensemble or "solo_piano"
+        if not plan.movements and (ensemble == "solo_piano" or _arrange.supported(ensemble)):
+            composer = Composer(plan, quality=self.options.get("quality", "best"),
+                                progress=self.report, theme=theme, form=form)
+            score = composer.compose()
+            plan.tempo = int(composer.tempo)
+            plan.tempo_text = composer.tempo_text
+            plan.time = tuple(composer.time)
+            return score, list(composer.notes), dict(composer.summary)
+        return compose(plan, self.model, progress=self.report), [], {}
+
+    def _finish(self, plan: CompositionPlan, message,
+                warnings: list[str] | None = None, theme=None, form: str | None = None
+                ) -> Result:
+        """Compose ``plan``. ``message`` is the reply, or a function of the
+        plan and what the composer decided that writes it."""
+        score, notes, summary = self._compose(plan, theme=theme, form=form)
+        if callable(message):
+            message = message(plan, summary)
         return Result(ok=True, message=message, musicxml=to_musicxml(score),
                       midi=to_midi(score), plan=plan, preview=summarise(score),
-                      analysis=analyse(score).describe(), warnings=warnings or [])
+                      analysis=analyse(score).describe(), warnings=warnings or [],
+                      notes=notes)
 
     # -- intents --------------------------------------------------------
     def _create(self, req: Request, existing, info) -> Result:
         plan = self._plan_for(req)
         style = resolve_style(plan.style)
-        return self._finish(plan, _voice.created_message(plan, style, self.voice_model))
+
+        def message(p: CompositionPlan, summary: dict) -> str:
+            if summary:
+                return _voice.composed_message(p, summary, self.voice_model)
+            return _voice.created_message(p, style, self.voice_model)
+        return self._finish(plan, message)
 
     def _continue(self, req: Request, existing: Score, info: ScoreAnalysis) -> Result:
         """Add new music that follows on from what is already written."""
@@ -242,8 +270,13 @@ class MotifAgent:
         plan.sections = sections
         plan.title = existing.title or plan.title
         plan.subtitle = existing.subtitle or plan.subtitle
-
-        result = self._finish(plan, "")
+        # the continuation keeps the page's metre and tempo, and works with
+        # the musician's own theme
+        plan.time_given = True
+        plan.tempo_given = True
+        plan.tempo_text = ""
+        from ..composer.listen import theme_from_score
+        result = self._finish(plan, "", theme=theme_from_score(existing), form="continuation")
         merged = _append_scores(existing, read_musicxml(result.musicxml))
         result.musicxml = to_musicxml(merged)
         result.midi = to_midi(merged)
@@ -269,8 +302,10 @@ class MotifAgent:
         for s in plan.sections:
             s.motif_op = "develop" if s.motif_op == "state" else s.motif_op
             s.energy = min(1.0, s.energy + 0.12)
+        plan.time_given = True
+        from ..composer.listen import theme_from_score
         return self._finish(plan, _voice.developed_message(
-            plan, existing.title, self.voice_model))
+            plan, existing.title, self.voice_model), theme=theme_from_score(existing))
 
     def _harmonize(self, req: Request, existing: Score, info: ScoreAnalysis) -> Result:
         """Keep the user's melody, write an accompaniment underneath it."""
@@ -278,23 +313,23 @@ class MotifAgent:
         plan.key = str(info.key)
         plan.time = info.time
         plan.tempo = int(info.tempo)
-        style = resolve_style(plan.style if req.style else info.detected_style)
+        from ..compose.styles import match_styles
+        named = match_styles(req.prompt.lower())
+        style = resolve_style(req.style or (plan.style if named else info.detected_style))
         plan.style = style.name
-
-        import random
-        rng = random.Random(plan.seed)
         bars = max(1, existing.measure_count)
-        plan.sections = build_sections("through_composed", Key.parse(plan.key),
-                                       style, rng, bars)
-        _fit_section_bars(plan.sections, bars)
 
-        generated = compose(plan, self.model, progress=self.report)
+        from ..composer.harmonize import harmonize_score
+        generated, notes = harmonize_score(
+            existing, plan.style, quality=self.options.get("quality", "best"),
+            progress=self.report, seed=plan.seed, title=existing.title)
         merged = _graft_melody(existing, generated)
+        texture = notes[-1].split(": ", 1)[-1].split(" in the manner")[0] if notes else "flowing"
         message = _voice.harmonized_message(
-            plan, existing.title, bars, style, plan.sections[0].texture_lh, self.voice_model)
+            plan, existing.title, bars, style, texture, self.voice_model)
         return Result(ok=True, message=message,
             musicxml=to_musicxml(merged), midi=to_midi(merged), plan=plan,
-            preview=summarise(merged), analysis=analyse(merged).describe())
+            preview=summarise(merged), analysis=analyse(merged).describe(), notes=notes)
 
     def _edit(self, req: Request, existing: Score, info: ScoreAnalysis) -> Result:
         """Direct transformations of the score that is already there."""

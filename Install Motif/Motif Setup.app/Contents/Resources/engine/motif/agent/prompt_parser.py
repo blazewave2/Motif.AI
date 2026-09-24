@@ -294,9 +294,11 @@ def parse_prompt(prompt: str, *, seed: int | None = None,
             bars = min(bars, 16)
     if ensemble == "piano_concerto" and not mb:
         bars = max(bars, 96)
+    length_bars = bars if (mb or mm) else 0
 
     # -- metre -------------------------------------------------------------
     met = _METER_RE.search(text)
+    time_given = bool(met)
     if met:
         time = (int(met.group(1)), int(met.group(2)))
     elif form in ("waltz", "mazurka", "minuet") or "waltz" in text:
@@ -323,6 +325,7 @@ def parse_prompt(prompt: str, *, seed: int | None = None,
                 bpm = v
                 tempo_text = words[0].title()
                 break
+    tempo_given = bpm is not None
     if bpm is None:
         lo, hi = style.tempo_range
         bpm = int(lo + (hi - lo) * (0.35 + rng.random() * 0.3))
@@ -348,6 +351,7 @@ def parse_prompt(prompt: str, *, seed: int | None = None,
         title=_title(text, key, form, style.display, rng, moods),
         subtitle=_subtitle(ensemble, style),
         style=style.name, key=str(key), time=time, tempo=bpm, tempo_text=tempo_text,
+        tempo_given=tempo_given, time_given=time_given, length_bars=length_bars,
         form=form, sections=sections, instruments=instruments,
         seed=rng.randint(1, 2 ** 30), prompt=prompt, character=character,
         ensemble=ensemble)
@@ -407,7 +411,9 @@ def _title_bucket(moods: dict[str, float], key: Key) -> str:
 
 def _title(text: str, key: Key, form: str, style_display: str, rng: random.Random,
            moods: dict[str, float] | None = None) -> str:
-    quoted = re.search(r"(?:called|titled|named)\s+[\"']?([\w \-']{2,40})[\"']?", text)
+    quoted = re.search(r"(?:called|titled|named)\s+[\"'“‘]([^\"'”’]{2,60})[\"'”’]", text) or \
+        re.search(r"(?:called|titled|named)\s+([\w \-']{2,40}?)"
+                  r"(?=$|[,.;:!?]|\s+(?:in|for|with|by|at|that|which|and|like|using)\b)", text)
     if quoted:
         return quoted.group(1).strip().title()
     formal = {"concerto": "Concerto", "sonata": "Sonata", "fugue": "Fugue",
