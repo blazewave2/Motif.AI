@@ -155,7 +155,26 @@ def composed_message(plan: CompositionPlan, summary: dict,
         else:
             tex = _texture_phrase(sec["texture"], rng)
             described.add(sec["texture"])
-        if role == "intro":
+        forces = sec.get("forces", "")
+        if role == "intro" and forces == "solo":
+            story.append(f"It opens with the piano alone ({_bars(a, b)}) — tolling chords over "
+                         f"deep octaves, growing towards the orchestra's entry.")
+        elif role == "theme" and forces == "orch_lead":
+            story.append(f"The orchestra states the theme ({_bars(a, b)}), violins and cellos "
+                         f"an octave apart, while the piano ripples beneath it.")
+        elif role == "theme" and forces == "tutti":
+            story.append(f"The orchestra opens with the theme ({_bars(a, b)}) before the "
+                         f"soloist enters.")
+        elif role == "contrast" and forces == "solo_lead":
+            story.append(f"The piano sings the second theme in {sec['key']} ({_bars(a, b)}) over "
+                         f"quiet strings, and the orchestra takes it up in turn.")
+        elif role == "cadenza":
+            story.append(f"A cadenza for the piano alone ({_bars(a, b)}) holds on the dominant "
+                         f"before everyone returns for the coda.")
+        elif role == "climax" and forces == "tutti":
+            story.append(f"The theme returns at the climax ({_bars(a, b)}) with the full "
+                         f"orchestra and the piano's massive chords together.")
+        elif role == "intro":
             story.append(f"It opens with {_bars(a, b)} of accompaniment alone — {tex}.")
         elif role == "theme":
             up = " that leans in from an upbeat" if th.get("upbeat") else ""
@@ -171,7 +190,10 @@ def composed_message(plan: CompositionPlan, summary: dict,
             story.append(f"The middle section{words} moves to {sec['key']} ({_bars(a, b)}) "
                          f"with a new, contrasting theme over {tex}.")
         elif role == "transition":
-            story.append(f"A short passage ({_bars(a, b)}) leads back home.")
+            if sec["key"] != key:
+                story.append(f"A short passage ({_bars(a, b)}) leads to {sec['key']}.")
+            else:
+                story.append(f"A short passage ({_bars(a, b)}) leads back home.")
         elif role == "development":
             story.append(f"{_bars(a, b).capitalize()} develop the opening idea in sequence "
                          f"through {sec['key']}.")
@@ -182,6 +204,8 @@ def composed_message(plan: CompositionPlan, summary: dict,
             how = {"ornament": ", ornamented", "octaves": " in octaves"}.get(
                 sec.get("variation", ""), "")
             story.append(f"The theme comes back{how} in {_bars(a, b)}.")
+        elif role == "closing" and forces == "tutti":
+            story.append(f"A coda for everyone ({_bars(a, b)}) brings it home in full voice.")
         elif role == "closing":
             story.append(f"A coda ({_bars(a, b)}) remembers the opening and settles.")
     # merge duplicate sentences for repeated sections

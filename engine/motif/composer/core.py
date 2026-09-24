@@ -211,7 +211,7 @@ class Composer:
             sections.append({"name": ps.section, "role": ps.role, "start": start, "end": stop,
                              "key": str(ps.key), "texture": ps.texture, "energy": ps.energy,
                              "words": ps.words, "recall": ps.recall is not None,
-                             "variation": ps.variation})
+                             "variation": ps.variation, "forces": ps.forces})
         return {"genre": self.genre, "family": self.family, "bars": int(end / self.bar),
                 "key": str(self.key), "time": tuple(self.time), "tempo": self.tempo,
                 "tempo_text": self.tempo_text, "ensemble": self.ensemble,
@@ -238,9 +238,22 @@ class Composer:
         return F(0)
 
     def _intro(self, ps: PhraseSpec, t: F, hstyle) -> Written:
-        """The accompaniment alone: the tonic, perhaps coloured, over a pedal."""
+        """The accompaniment alone: the tonic, perhaps coloured, over a pedal —
+        or, for a longer opening that leads somewhere, a progression that
+        gathers on the dominant."""
         key = ps.key
         tonic = "i" if key.is_minor else "I"
+        if ps.bars >= 3:
+            mode = "minor" if key.is_minor else "major"
+            colour = self.rng.choice([p for _, p in hstyle.tonic[mode]])
+            pre = self.rng.choice([p for _, p in hstyle.predominant[mode]])
+            labels = ([tonic] + [c for c in colour[1:] if c != tonic][:1] + pre[:1])[:ps.bars - 1]
+            while len(labels) < ps.bars - 1:
+                labels.append(labels[-1])
+            labels.append("V")
+            hs = [Harmony(r, key, t + self.bar * k, self.bar) for k, r in enumerate(labels)]
+            hs[-1].cadence = "HC"
+            return Written(ps, t, hs, [], [])
         if ps.bars == 1:
             labels = [tonic]
         else:

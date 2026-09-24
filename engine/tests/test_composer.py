@@ -230,3 +230,15 @@ def test_every_chord_in_every_style_is_spelled_sensibly():
                         chord = chord_for(label, key)
                         for p in chord.pitches(4, key):
                             assert abs(p.alter) <= 1, (style.name, mode, label, str(p))
+
+
+def test_a_piano_concerto_passes_the_music_between_soloist_and_orchestra():
+    c, score = _compose("Make a full Rachmaninoff style piano concerto using a dark E flat "
+                        "minor melody", seed=1)
+    assert _errors(c.msn) == []
+    assert c.ensemble == "piano_concerto"
+    forces = {s["forces"] for s in c.summary["sections"]}
+    assert {"solo", "orch_lead", "tutti", "cadenza"} <= forces
+    piece = parse(c.msn)
+    ids = [p.id for p in piece.parts]
+    assert "Pno" in ids and "Vn1" in ids and "Timp" in ids

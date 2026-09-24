@@ -33,6 +33,11 @@ class PhraseSpec:
     words: str = ""              # expressive marking at the start of the phrase
     tempo_scale: float = 1.0
     new_section: bool = False    # the first phrase of a section
+    #: In a concerto, who plays: tutti (everyone, the orchestra with the tune),
+    #: solo (the piano alone), solo_lead (the piano with the tune, the
+    #: orchestra accompanying), orch_lead (the orchestra with the tune, the
+    #: piano accompanying) or cadenza.
+    forces: str = ""
 
 
 @dataclass
@@ -81,7 +86,7 @@ _INTRO_TEXTURES = ("nocturne", "sweep", "sweep16", "bells", "repeated", "waltz",
 
 def _add_intro(plan: FormPlan, prof: Profile, target_bars: int, rng: random.Random) -> None:
     """A bar or two of accompaniment alone, as so many Romantic pieces begin."""
-    if not plan.phrases:
+    if not plan.phrases or plan.genre in ("concerto", "continuation", "invention"):
         return
     first = plan.phrases[0]
     if first.role != "theme" or first.texture not in _INTRO_TEXTURES or \
@@ -103,6 +108,7 @@ def genre_family(genre: str) -> str:
 #: Names of pieces a request may ask for, most specific first.
 GENRE_WORDS = (
     "etude-tableau", "étude-tableau", "etude tableau", "song without words", "moment musical",
+    "concerto",
     "lyric piece", "gymnopédie", "gymnopedie", "gnossienne", "liebestraum", "consolation",
     "nocturne", "prelude", "prélude", "waltz", "valse", "mazurka", "polonaise", "sonatina",
     "sonata", "minuet", "menuet", "gavotte", "sarabande", "gigue", "invention", "fugue",
@@ -145,6 +151,7 @@ def choose_metre(family: str, prof: Profile, rng: random.Random) -> tuple[int, i
 def _genre_family(genre: str) -> str:
     for fam, words in (
         ("continuation", ("continuation",)),
+        ("concerto", ("concerto",)),
         ("waltz", ("waltz", "valse", "ländler")),
         ("mazurka", ("mazurka", "polonaise")),
         ("sonata", ("sonata", "sonatina", "first movement")),
@@ -412,8 +419,67 @@ def _continuation(prof: Profile, key: Key, bars: int, rng: random.Random, charac
     return FormPlan("continuation", ph)
 
 
+def _concerto(prof: Profile, key: Key, bars: int, rng: random.Random, character: str
+              ) -> FormPlan:
+    """A concerto first movement: an opening, the first theme, a passage to
+    the second key and a lyrical second theme passed between piano and
+    orchestra, a development in dialogue, a return at the climax, a cadenza
+    for the piano alone and a coda for everyone."""
+    tx: dict = {}
+    romantic = prof.harmony in ("russian", "romantic", "film")
+    second = _related(key, "relative" if key.is_minor else "dominant")
+    dev = _related(key, "subdominant" if key.is_minor else "relative")
+    words = prof.words
+    ph: list[PhraseSpec] = []
+    if romantic:
+        # the piano alone, tolling chords that grow into the first tutti
+        ph.append(_phr("intro", "intro", "intro", 4 if bars >= 80 else 2, key, "HC", 0.5,
+                       "bells", new_section=True, forces="solo"))
+        lead_tex = rng.choice(["sweep", "sweep16"]) if prof.octave_climax else \
+            _tex(prof, "theme", rng, tx)
+        ph.append(_phr("P", "theme", "sentence", 8, key, "HC", 0.6, lead_tex, new_section=True,
+                       forces="orch_lead", words=words.get("theme", "")))
+        ph.append(_phr("P", "theme", "consequent", 8, key, "PAC", 0.65, lead_tex,
+                       forces="orch_lead"))
+    else:
+        # the orchestra's ritornello, then the soloist enters with the theme
+        tex = _tex(prof, "theme", rng, tx)
+        ph.append(_phr("R", "theme", "sentence", 8, key, "PAC", 0.65, tex, new_section=True,
+                       forces="tutti"))
+        ph.append(_phr("P", "return", "sentence", 8, key, "HC", 0.5, tex, recall=0,
+                       new_section=True, forces="solo_lead"))
+    ph.append(_phr("TR", "transition", "development", 4, second, "HC", 0.7,
+                   _tex(prof, "contrast", rng, tx), forces="solo"))
+    stex = _tex(prof, "return", rng, tx) if romantic else _tex(prof, "theme", rng, tx)
+    s_idx = len(ph)
+    ph.append(_phr("S", "contrast", "sentence", 8, second, "PAC", 0.5, stex, new_section=True,
+                   forces="solo_lead", words="espressivo" if romantic else ""))
+    if bars >= 80:
+        ph.append(_phr("S", "contrast", "sentence", 8, second, "PAC", 0.65, stex, recall=s_idx,
+                       forces="orch_lead"))
+    ph.append(_phr("Dev", "development", "development", 8, dev, "HC", 0.7,
+                   _tex(prof, "contrast", rng, tx), new_section=True, forces="tutti"))
+    if bars >= 96:
+        ph.append(_phr("Dev", "development", "development", 8, second, "HC", 0.8,
+                       _tex(prof, "contrast", rng, tx), forces="solo"))
+    ph.append(_phr("Dev", "transition", "development", 4, key, "HC", 0.88,
+                   _tex(prof, "contrast", rng, tx), forces="tutti"))
+    first_theme = next(i for i, p in enumerate(ph) if p.role == "theme")
+    ph.append(_phr("P'", "climax", ph[first_theme].kind, 8, key, "PAC", 0.97,
+                   _tex(prof, "climax", rng, tx), recall=first_theme,
+                   variation="octaves" if prof.octave_climax else "", new_section=True,
+                   forces="tutti", words=words.get("climax", "")))
+    ph.append(_phr("Cad", "cadenza", "development", 8 if bars >= 96 else 4, key, "HC", 0.9,
+                   "sweep16" if prof.harmony != "baroque" else "walking",
+                   new_section=True, forces="cadenza", variation="octaves", words="Cadenza"))
+    ph.append(_phr("coda", "closing", "closing", 4, key, "PAC", 0.95,
+                   _tex(prof, "climax", rng, tx), new_section=True, forces="tutti"))
+    return FormPlan("concerto", ph)
+
+
 _TEMPLATES = {
     "continuation": _continuation,
+    "concerto": _concerto,
     "prelude": _ternary, "nocturne": _ternary, "waltz": _waltz, "mazurka": _mazurka,
     "sonata": _sonata, "minuet": _minuet, "invention": _invention, "etude": _etude,
 }

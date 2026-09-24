@@ -19,7 +19,7 @@ from fractions import Fraction as F
 from ..theory.pitch import Key, Pitch
 from .harmony import Harmony, harmony_at, spell
 from .notation import Mark, Note, Voice
-from .texture import TextureContext, realise, voicing
+from .texture import TextureContext, bass_note, realise, voicing
 
 
 @dataclass(frozen=True)
@@ -64,6 +64,19 @@ ENSEMBLE_PARTS: dict[str, list[PartDef]] = {
                   PartDef("Vla", "viola", "Viola", "tenor", 48, 76),
                   PartDef("Vc", "cello", "Violoncello", "bass", 36, 67),
                   PartDef("Cb", "double_bass", "Contrabass", "bass8", 28, 55)],
+    "piano_concerto": [PartDef("Fl", "flute", "Flute", "lead8", 60, 93),
+                       PartDef("Ob", "oboe", "Oboe", "lead_solo", 60, 88),
+                       PartDef("Cl", "clarinet", "Clarinet in B♭", "alto_w", 52, 84),
+                       PartDef("Bsn", "bassoon", "Bassoon", "bass_w", 36, 67),
+                       PartDef("Hn", "horn", "Horn in F", "horn", 48, 74),
+                       PartDef("Tpt", "trumpet", "Trumpet in B♭", "tutti", 58, 80),
+                       PartDef("Timp", "timpani", "Timpani", "timpani", 38, 55),
+                       PartDef("Pno", "piano", "Piano", "concerto_piano", 21, 108),
+                       PartDef("Vn1", "violin", "Violin I", "lead", 55, 96),
+                       PartDef("Vn2", "violin", "Violin II", "alto", 55, 84),
+                       PartDef("Vla", "viola", "Viola", "tenor", 48, 76),
+                       PartDef("Vc", "cello", "Violoncello", "bass", 36, 67),
+                       PartDef("Cb", "double_bass", "Contrabass", "bass8", 28, 55)],
     "chamber": [PartDef("Fl", "flute", "Flute", "lead", 60, 93),
                 PartDef("Cl", "clarinet", "Clarinet in B♭", "alto", 52, 84),
                 PartDef("Vn", "violin", "Violin", "lead8lo", 55, 88),
@@ -77,6 +90,7 @@ ENSEMBLE_PARTS: dict[str, list[PartDef]] = {
 #: Where the tune sits for each ensemble's lead: (low, high, climax).
 LEAD_RANGE: dict[str, tuple[int, int, int]] = {
     "voice_piano": (62, 76, 79),
+    "piano_concerto": (64, 86, 91),
     "violin_piano": (64, 86, 93),
     "cello_piano": (48, 67, 72),
     "piano_trio": (64, 86, 91),
@@ -205,6 +219,8 @@ def arrange(composer, written, end: F) -> tuple[list[tuple[str, str, str]], list
         declared.append((p.id, p.instrument, p.name))
         if p.role in ("accomp", "keys"):
             voices += _keyboard(composer, written, end, p, accompany=(p.role == "accomp"))
+        elif p.role == "concerto_piano":
+            voices += _concerto_piano(composer, written, end, p)
         elif p.role == "organ":
             voices += _organ(composer, written, chords, p)
         elif p.role == "guitar":
@@ -233,18 +249,58 @@ def _fit(m: int, low: int, high: int) -> int | None:
     return m if low <= m <= high else None
 
 
+_TUNE_ROLES = ("lead", "lead8", "lead8lo", "lead_solo", "tutti")
+
+
+def _concerto_gate(role: str, forces: str, energy: float) -> tuple[bool, float, str | None]:
+    """In a concerto, whether an orchestral part plays a phrase, at what
+    strength, and whether its motion is overridden: silent while the piano
+    is alone, a quiet held bed of strings under the piano's tune, the tune
+    itself (cellos an octave below the violins) when the orchestra leads."""
+    if forces in ("solo", "cadenza"):
+        return False, energy, None
+    if forces == "solo_lead":
+        if role in _TUNE_ROLES or role in ("alto_w", "bass_w", "horn", "timpani"):
+            return False, energy, None
+        return True, min(energy, 0.45), "hold"
+    if forces == "orch_lead":
+        if role in ("tutti", "timpani"):
+            return False, energy, None
+        # under the orchestra's tune the piano ripples: the inner parts hold
+        return True, energy, (None if energy >= 0.8 else "hold")
+    return True, energy, None
+
+
 def _line(composer, written, chords, p: PartDef, phrase_at, bar: F, beat: F) -> Voice:
     v = Voice(p.id)
     key_spell = composer.key
+    concerto = composer.ensemble == "piano_concerto"
     for w in written:
         e = w.spec.energy
+        forced_motion = None
+        if concerto:
+            plays, e, forced_motion = _concerto_gate(p.role, w.spec.forces, e)
+            if not plays:
+                continue
+            # in the Romantic concerto the cellos sing the tune an octave down
+            if p.id == "Vc" and w.spec.forces in ("orch_lead", "tutti") and \
+                    composer.prof.harmony in ("russian", "romantic"):
+                for n in w.melody:
+                    m = _fit(n.midi - 12, p.low, 76)
+                    if m is None:
+                        continue
+                    h = harmony_at(w.harmony, n.onset)
+                    v.add(Note(n.onset, n.dur, [spell(m, h)], slur_start=n.slur_start,
+                               slur_stop=n.slur_stop))
+                continue
         # -- the tune and its doublings
-        if p.role in ("lead", "lead8", "lead8lo", "lead_solo", "tutti"):
+        if p.role in _TUNE_ROLES:
             play = {
                 "lead": True,
-                "lead8": e >= 0.6,
+                "lead8": e >= 0.72,
                 "lead8lo": w.spec.role in ("contrast", "climax", "development"),
-                "lead_solo": e < 0.6 and w.spec.role in ("theme", "return", "closing"),
+                "lead_solo": (e < 0.6 and w.spec.role in ("theme", "return", "closing")) or
+                             (w.spec.forces == "orch_lead" and w.spec.role == "contrast"),
                 "tutti": e >= 0.85,
             }[p.role]
             if not play:
@@ -259,7 +315,7 @@ def _line(composer, written, chords, p: PartDef, phrase_at, bar: F, beat: F) -> 
                 v.add(Note(n.onset, n.dur, [pitch], marks=list(n.marks),
                            slur_start=n.slur_start, slur_stop=n.slur_stop))
             continue
-        motion = _motion(w, composer.prof.harmony)
+        motion = forced_motion or _motion(w, composer.prof.harmony)
         span = [c for c in chords if w.start <= c.onset < w.start + bar * w.spec.bars]
         for c in span:
             h = c.harmony
@@ -321,7 +377,11 @@ def _dynamics_for(v: Voice, written, composer) -> None:
         if not notes:
             last = None
             continue
-        dyn = _energy_dynamic(composer.prof, w.spec.energy)
+        energy = w.spec.energy
+        if composer.ensemble == "piano_concerto" and w.spec.forces == "solo_lead" and \
+                not v.label.startswith("Pno"):
+            energy = min(energy, 0.35)          # the orchestra accompanies the soloist softly
+        dyn = _energy_dynamic(composer.prof, energy)
         if w.spec.role == "closing" and w.spec.section == "coda":
             dyn = composer.prof.dynamics[0]
         if dyn != last:
@@ -367,6 +427,137 @@ def _keyboard(composer, written, end: F, p: PartDef, accompany: bool) -> list[Vo
     if rh2.notes:
         out.insert(1, rh2)
     return out
+
+
+def _concerto_piano(composer, written, end: F, p: PartDef) -> list[Voice]:
+    """The soloist: alone, with the tune while the orchestra accompanies,
+    accompanying the orchestra's tune in both hands, in massive chords with
+    the tutti, and in the cadenza."""
+    from .core import _chord_fill, _rh_extent
+    from .notation import Note as N
+    prefix = p.id + "."
+    rh = Voice(prefix + "RH")
+    rh2 = Voice(prefix + "RH2", secondary=True)
+    lh = Voice(prefix + "LH")
+    romantic = composer.prof.harmony in ("russian", "romantic", "film")
+    # the right hand's own tune, wherever the piano has it
+    for w in written:
+        f = w.spec.forces
+        full = f == "cadenza" or (f == "tutti" and romantic)
+        if f in ("solo", "solo_lead", "cadenza") or (f == "tutti" and romantic):
+            for m in sorted(w.melody, key=lambda n: n.onset):
+                pch = m.pitch or spell(m.midi, harmony_at(w.harmony, m.onset))
+                pitches = [pch]
+                if full:
+                    h = harmony_at(w.harmony, m.onset)
+                    pitches = sorted(_chord_fill(pch, h, octave=True,
+                                                 inner=(f == "tutti" and m.dur >= F(1, 2)))
+                                     + [pch], key=lambda x: x.midi)
+                rh.add(N(m.onset, m.dur, pitches, graces=list(m.graces), marks=list(m.marks),
+                         slur_start=m.slur_start, slur_stop=m.slur_stop))
+    ctx = TextureContext(composer.time, composer.bar, composer.beat, composer.key,
+                         bass_low=composer.prof.bass_low, rng=composer.rng,
+                         tempo=float(composer.tempo))
+    ctx.melody_floor, ctx.melody_top = _rh_extent(rh, composer.bar, end) if rh.notes else ({}, {})
+    for w in written:
+        f = w.spec.forces
+        ctx.key = w.spec.key
+        ctx.energy = w.spec.energy
+        ctx.melody = w.melody
+        span_end = w.start + composer.bar * w.spec.bars
+        if f == "tutti" and not romantic:
+            continue                         # the classical soloist rests in the tutti
+        if w.spec.role == "intro":
+            _tolling(rh, lh, w, composer, ctx)
+            continue
+        kind = w.spec.texture
+        if f == "tutti" and romantic:
+            kind = "bells"
+        tex = realise(kind, w.harmony, w.start, span_end, ctx)
+        for n in tex:
+            h = harmony_at(w.harmony, n.onset)
+            pitches = sorted((spell(m, h) for m in n.midis), key=lambda x: x.midi)
+            (rh2 if n.staff == "RH" else lh).add(
+                N(n.onset, n.dur, pitches, marks=list(n.marks), tuplet=n.tuplet,
+                  tuplet_start=n.tuplet_start, tuplet_stop=n.tuplet_stop))
+        if f == "orch_lead":
+            _rh_figuration(rh, w, composer, ctx)
+    # the cadenza's last chord is held for as long as the soloist likes
+    for w in written:
+        if w.spec.forces == "cadenza":
+            span_end = w.start + composer.bar * w.spec.bars
+            for v in (rh, lh):
+                last = [n for n in v.notes if w.start <= n.onset < span_end and n.pitches]
+                if last:
+                    n = max(last, key=lambda x: x.onset)
+                    if "fermata" not in n.marks:
+                        n.marks = list(n.marks) + ["fermata"]
+    _dynamics_for(rh, written, composer)
+    if composer.prof.pedal == "harmony":
+        for w in written:
+            if w.spec.forces == "tutti" and not romantic:
+                continue
+            for h in w.harmony:
+                lh.marks.append(Mark(h.onset, "ped"))
+    for w in written:
+        if w.spec.words and w.melody and w.spec.forces in ("solo", "solo_lead", "cadenza"):
+            rh.marks.append(Mark(w.melody[0].onset, "text", w.spec.words))
+    return [rh, rh2, lh]
+
+
+def _tolling(rh: Voice, lh: Voice, w, composer, ctx) -> None:
+    """The piano alone, as Rachmaninoff opens his second concerto: a chord in
+    the right hand each bar, a deep octave tolling beneath it, growing louder
+    towards the orchestra's entry."""
+    bar = composer.bar
+    prev: list[int] = []
+    t = w.start
+    end = w.start + bar * w.spec.bars
+    rh.marks.append(Mark(w.start, "dyn", "pp"))
+    rh.marks.append(Mark(w.start, "cresc"))
+    while t < end:
+        h = harmony_at(w.harmony, t)
+        v = voicing(h, ctx, 4, 60, 79, prev, max_span=12)
+        prev = v or prev
+        if v:
+            rh.add(Note(t, bar, [spell(m, h) for m in v], marks=["accent"]))
+        b = bass_note(h, ctx)
+        low = b - 12 if b - 12 >= 24 else b
+        lh.add(Note(t, bar, [spell(low, h), spell(low + 12, h)]))
+        t += bar
+    rh.marks.append(Mark(end - composer.beat, "end"))
+
+
+def _rh_figuration(rh: Voice, w, composer, ctx) -> None:
+    """While the orchestra sings, the piano's right hand ripples through the
+    harmony in the middle of the keyboard."""
+    beat = composer.beat
+    compound = beat == F(3, 2)
+    unit = F(1, 2) if compound else F(1, 3)
+    per = 3
+    for h in w.harmony:
+        tones = [m for m in range(55, 80) if m % 12 in h.pcs]
+        line = []
+        for m in tones:
+            if not line or m - line[-1] >= 3:
+                line.append(m)
+        if len(line) < 3:
+            continue
+        wave = line[:5] + list(reversed(line[1:4]))
+        t, k = h.onset, 0
+        while t < h.end:
+            for j in range(per):
+                on = t + unit * j
+                if on >= h.end:
+                    break
+                n = Note(on, unit, [spell(wave[k % len(wave)], h)])
+                if not compound:
+                    n.tuplet = (3, 2)
+                    n.tuplet_start = j == 0
+                    n.tuplet_stop = j == per - 1
+                rh.add(n)
+                k += 1
+            t += beat
 
 
 def _rh_chords(rh: Voice, w, composer, ctx) -> None:
