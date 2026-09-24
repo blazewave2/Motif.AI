@@ -306,13 +306,19 @@ def _line(composer, written, chords, p: PartDef, phrase_at, bar: F, beat: F) -> 
             if not play:
                 continue
             shift = 12 if p.role == "lead8" else 0
-            for n in w.melody:
+            mel = sorted(w.melody, key=lambda n: n.onset)
+            for k, n in enumerate(mel):
                 m = _fit(n.midi + shift, p.low, p.high)
                 if m is None:
                     continue
                 h = harmony_at(w.harmony, n.onset)
                 pitch = n.pitch if (m == n.midi and n.pitch is not None) else spell(m, h)
-                v.add(Note(n.onset, n.dur, [pitch], marks=list(n.marks),
+                marks = [x for x in n.marks if x != "tr" or p.instrument != "voice"]
+                # a singer breathes where the phrase ends
+                if p.instrument == "voice" and n.slur_stop and k < len(mel) - 1 and \
+                        "breath" not in marks:
+                    marks.append("breath")
+                v.add(Note(n.onset, n.dur, [pitch], marks=marks,
                            slur_start=n.slur_start, slur_stop=n.slur_stop))
             continue
         motion = forced_motion or _motion(w, composer.prof.harmony)

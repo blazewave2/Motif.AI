@@ -425,6 +425,9 @@ class Composer:
         # -- key signatures and section breaks
         self._key_changes(sheet, written)
 
+        # -- the melody's own phrasing and articulation, before it is written down
+        for w in written:
+            self._shape_melody(w)
         # -- the right hand: the melody, doubled or filled out where the music swells
         for wi, w in enumerate(written):
             ps = w.spec
@@ -504,6 +507,8 @@ class Composer:
                       time=self.time, tempo=self.tempo, tempo_text=self.tempo_text,
                       composer="Motif.AI", bars=bars)
         self._key_changes(sheet, written)
+        for w in written:
+            self._shape_melody(w)
         parts, voices = _arrange.arrange(self, written, end)
         sheet.parts = parts
         lead = voices[0]
@@ -511,8 +516,6 @@ class Composer:
             ps = w.spec
             if ps.words and w.melody:
                 lead.marks.append(Mark(w.melody[0].onset, "text", ps.words))
-            if w.melody and self.prof.harmony != "baroque":
-                _slur(w.melody, self.bar, self.beat)
         for v in voices:
             final = [n for n in v.notes if n.pitches]
             if final:
@@ -602,15 +605,47 @@ class Composer:
             if len(after) >= 2:
                 rh.marks.append(Mark(after[0].onset, "dim"))
                 rh.marks.append(Mark(after[-1].onset, "end"))
-        # slurs over each breath of the melody
-        if w.melody and prof.harmony != "baroque":
-            _slur(w.melody, self.bar, self.beat)
         # pedal with every change of harmony
         if prof.pedal == "harmony":
             for h in w.harmony:
                 lh.marks.append(Mark(h.onset, "ped"))
         elif prof.pedal == "sparse" and ps.role in ("closing", "climax"):
             lh.marks.append(Mark(w.harmony[0].onset, "ped"))
+
+
+    def _shape_melody(self, w: Written) -> None:
+        """Slurs over each breath of the melody, then its articulation."""
+        if w.melody and self.prof.harmony != "baroque":
+            _slur(w.melody, self.bar, self.beat,
+                  longest=2 if self.prof.harmony == "classical" else 4)
+        self._articulate(w)
+
+    def _articulate(self, w: Written) -> None:
+        """The Classical and Baroque touch: detached notes where the line
+        leaps or repeats at a quick tempo, a trill on the note before the
+        final tonic of a full close, and — for Beethoven — a sforzando to
+        drive a stormy passage."""
+        prof = self.prof
+        mel = sorted((n for n in w.melody if n.onset >= w.start), key=lambda n: n.onset)
+        if not mel:
+            return
+        classical = prof.harmony in ("classical", "baroque")
+        quick = float(self.tempo) * float(self.beat) >= 108
+        if classical and quick:
+            for a, b, c in zip(mel, mel[1:], mel[2:]):
+                if b.dur <= self.beat and not (b.slur_start or b.slur_stop) and \
+                        (abs(b.midi - a.midi) >= 3 or b.midi == a.midi) and \
+                        abs(c.midi - b.midi) >= 3 and "stacc" not in b.marks:
+                    b.marks = list(b.marks) + ["stacc"]
+        if classical and w.spec.cadence == "PAC" and len(mel) >= 2:
+            pen = mel[-2]
+            deg = (pen.midi - w.spec.key.tonic_pc) % 12
+            if pen.dur >= self.beat / 2 and deg in (2, 11) and "tr" not in pen.marks:
+                pen.marks = list(pen.marks) + ["tr"]
+        if prof.name == "beethoven" and w.spec.energy >= 0.7:
+            for n in mel:
+                if (n.onset - w.start) % (self.bar * 2) == 0 and n.dur >= self.beat:
+                    n.marks = list(n.marks) + ["accent"]
 
 
 # ---------------------------------------------------------------------------
@@ -1016,10 +1051,11 @@ def _energy_dynamic(prof: Profile, energy: float) -> str:
     return _DYNAMICS[idx]
 
 
-def _slur(melody: list[MelNote], bar: F, beat: F) -> None:
+def _slur(melody: list[MelNote], bar: F, beat: F, longest: int = 4) -> None:
     """Slurs follow the breathing of the line: a slur closes on a long note
-    that ends a bar, or before a wide leap, and never covers fewer than
-    three notes."""
+    that ends a bar, or before a wide leap, never covers fewer than three
+    notes, and never runs longer than ``longest`` bars (a Classical slur
+    spans a gesture, a Romantic one a whole line)."""
     notes = sorted(melody, key=lambda n: n.onset)
     group: list[MelNote] = []
     for i, n in enumerate(notes):
@@ -1029,7 +1065,9 @@ def _slur(melody: list[MelNote], bar: F, beat: F) -> None:
         if nxt is not None:
             long_end = n.dur >= 2 * beat and (n.end % bar == 0 or n.dur >= bar / 2)
             leap = abs(nxt.midi - n.midi) >= 7
-            breath = (long_end or leap) and len(group) >= 3
+            too_long = nxt.onset - group[0].onset >= bar * longest and \
+                nxt.onset % bar == 0
+            breath = ((long_end or leap) and len(group) >= 3) or (too_long and len(group) >= 3)
         if breath:
             if len(group) >= 2:
                 group[0].slur_start = 1
