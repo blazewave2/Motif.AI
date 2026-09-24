@@ -252,15 +252,43 @@ _STEP_WEIGHTS = {
 
 
 def invent_motif(style: MelodyStyle, time: tuple[int, int], rng: random.Random,
-                 candidates: int = 24) -> Motif:
-    """The most characterful of a batch of candidate ideas."""
+                 candidates: int = 24, character: str = "") -> Motif:
+    """The most characterful of a batch of candidate ideas — and, when the
+    request asks for a character, the one that has it."""
     best, best_score = None, -1e9
     for _ in range(candidates):
         m = _random_motif(style, time, rng)
-        sc = motif_score(m, style)
+        sc = motif_score(m, style) + character_fit(m, character)
         if sc > best_score:
             best, best_score = m, sc
     return best
+
+
+def character_fit(m: Motif, character: str) -> float:
+    """How well an idea suits the mood asked for: drama rises by arpeggio in
+    dotted rhythm over a wide span; calm and grief move by step in a narrow
+    one; play and joy skip in short notes."""
+    c = (character or "").lower()
+    if not c or not m.steps:
+        return 0.0
+    pos = m.contour
+    span = max(pos) - min(pos)
+    values = list(m.rhythm) + list(m.second)
+    s = 0.0
+    if any(w in c for w in ("dramatic", "stormy", "triumphant")):
+        arps = sum(1 for a, b in zip(m.steps, m.steps[1:]) if a >= 2 and b >= 2 or
+                   (a <= -2 and b <= -2))
+        s += 0.8 * min(arps, 2)
+        s += 0.6 if span >= 5 else 0.0
+        s += 0.5 if any(v in (F(3, 2), F(3, 4)) for v in values) else 0.0
+    if any(w in c for w in ("calm", "sad", "nostalgic", "mysterious")):
+        s += 0.7 if max(abs(x) for x in m.steps) <= 2 else 0.0
+        s -= 0.3 * max(0, span - 5)
+        s += 0.4 if max(values) >= 2 else 0.0
+    if any(w in c for w in ("playful", "joyful")):
+        s += 0.5 * min(3, sum(1 for v in values if v <= F(1, 2)))
+        s += 0.4 if any(abs(x) == 2 for x in m.steps) else 0.0
+    return s
 
 
 def _random_motif(style: MelodyStyle, time: tuple[int, int], rng: random.Random,

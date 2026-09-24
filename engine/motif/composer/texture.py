@@ -57,6 +57,7 @@ class TextureContext:
     prev_bass: int | None = None
     tempo: float = 90.0            # beats per minute, so figuration suits the speed
     melody: list = field(default_factory=list)   # the phrase's tune, for textures that imitate it
+    virtuoso: bool = False         # a composer whose runs stay fast at any tempo
 
 
 def bass_note(h: Harmony, ctx: TextureContext, octave_down: bool = False) -> int:
@@ -271,7 +272,15 @@ def block(h: Harmony, t0: F, dur: F, ctx: TextureContext, rh_inner: bool = True
         top = min(_below_melody(ctx, t0, ctx.mid_high + 2), b + 12)
         lh += voicing(h, ctx, 2, b + 3, top, ctx.prev_voicing, max_span=9)
     ctx.prev_voicing = [m for m in lh if m > b] or ctx.prev_voicing
-    out.append(TexNote(t0, dur, sorted(set(lh))))
+    if ctx.tempo * float(ctx.beat) >= 110 and dur >= 2 * ctx.beat:
+        # at a quick tempo a held chord goes dead: strike it on every beat
+        t = t0
+        while t < t0 + dur:
+            d = min(ctx.beat, t0 + dur - t)
+            out.append(TexNote(t, d, sorted(set(lh))))
+            t += ctx.beat
+    else:
+        out.append(TexNote(t0, dur, sorted(set(lh))))
     if rh_inner:
         v = inner_chord(h, t0, dur, ctx, 2)
         if v:
@@ -324,7 +333,12 @@ def sweep(h: Harmony, t0: F, dur: F, ctx: TextureContext, triplets: bool = True
     if len(line) < 3:
         line = [b, b + 7, b + 12]
     wave = line + list(reversed(line[1:-1]))
-    if triplets and ctx.beat == 1:
+    quick = ctx.tempo * float(ctx.beat)
+    if not triplets and quick >= 120 and ctx.beat == 1 and not ctx.virtuoso:
+        triplets = True       # sixteenths would be a blur at this speed: triplet eighths
+    if triplets and ctx.beat == 1 and quick >= 150 and not ctx.virtuoso:
+        per_beat, unit, tup = 2, F(1, 2), None     # and at a real Allegro, plain eighths
+    elif triplets and ctx.beat == 1:
         per_beat, unit, tup = 3, F(1, 3), (3, 2)
     elif ctx.beat == F(3, 2):
         per_beat, unit, tup = 3, F(1, 2), None

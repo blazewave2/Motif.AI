@@ -139,7 +139,7 @@ class Composer:
         self._say("themes", "Inventing the themes" if self.theme is None else
                   "Listening to your theme", "", 0.06)
         motif = self.theme.motif if self.theme is not None else \
-            invent_motif(mstyle, self.time, self.rng, self.care.motifs)
+            invent_motif(mstyle, self.time, self.rng, self.care.motifs, plan.character)
         contrast = invent_contrast(mstyle, motif, self.time, self.rng, self.care.motifs)
         writers = {
             "A": MelodyWriter(mstyle, motif, self.rng, beam=self.care.beam, time=self.time),
@@ -442,7 +442,8 @@ class Composer:
 
         # -- the accompaniment, kept clear of the right hand
         ctx = TextureContext(self.time, self.bar, self.beat, self.key,
-                             bass_low=prof.bass_low, rng=self.rng, tempo=float(self.tempo))
+                             bass_low=prof.bass_low, rng=self.rng, tempo=float(self.tempo),
+                             virtuoso=_virtuoso(prof))
         ctx.melody_floor, ctx.melody_top = _rh_extent(rh, self.bar, end)
         for wi, w in enumerate(written):
             ps = w.spec
@@ -659,6 +660,10 @@ def judge_melody(notes: list[MelNote], plan: PhrasePlan) -> float:
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
+def _virtuoso(prof: Profile) -> bool:
+    return prof.octave_climax or prof.name in ("chopin", "liszt", "rachmaninoff", "scriabin")
+
+
 def prof_pedal(prof: Profile) -> bool:
     return prof.harmony in ("russian", "romantic", "impressionist")
 

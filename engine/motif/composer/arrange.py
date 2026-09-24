@@ -455,9 +455,10 @@ def _concerto_piano(composer, written, end: F, p: PartDef) -> list[Voice]:
                                      + [pch], key=lambda x: x.midi)
                 rh.add(N(m.onset, m.dur, pitches, graces=list(m.graces), marks=list(m.marks),
                          slur_start=m.slur_start, slur_stop=m.slur_stop))
+    from .core import _virtuoso
     ctx = TextureContext(composer.time, composer.bar, composer.beat, composer.key,
                          bass_low=composer.prof.bass_low, rng=composer.rng,
-                         tempo=float(composer.tempo))
+                         tempo=float(composer.tempo), virtuoso=_virtuoso(composer.prof))
     ctx.melody_floor, ctx.melody_top = _rh_extent(rh, composer.bar, end) if rh.notes else ({}, {})
     for w in written:
         f = w.spec.forces
