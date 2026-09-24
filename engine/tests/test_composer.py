@@ -242,3 +242,28 @@ def test_a_piano_concerto_passes_the_music_between_soloist_and_orchestra():
     piece = parse(c.msn)
     ids = [p.id for p in piece.parts]
     assert "Pno" in ids and "Vn1" in ids and "Timp" in ids
+
+
+def test_a_musicians_melody_is_harmonised_and_kept_exactly():
+    from motif.agent.agent import MotifAgent, Request
+    from motif.engrave.musicxml import to_musicxml
+    from motif.engrave.musicxml_reader import read_musicxml
+    from motif.notation.to_score import to_score
+    msn = ("title: My Tune\nkey: D major\ntime: 4/4\ntempo: 96\npart: Pno piano\n\n"
+           + "".join(f"m{i + 1}\n  RH: {bar}\n  LH: R\n" for i, bar in enumerate([
+               "F#4:q F#4:q G4:q A4:q", "A4:q G4:q F#4:q E4:q", "D4:q D4:q E4:q F#4:q",
+               "F#4:q. E4:e E4:h", "F#4:q F#4:q G4:q A4:q", "A4:q G4:q F#4:q E4:q",
+               "D4:q D4:q E4:q F#4:q", "E4:q. D4:e D4:h"])))
+    score, _ = to_score(parse(msn))
+    result = MotifAgent(options={"quality": "sketch"}).run(
+        Request(prompt="Add a left hand accompaniment", score_xml=to_musicxml(score), seed=3))
+    assert result.ok and result.intent == "harmonize", result.error
+    out = read_musicxml(result.musicxml)
+    tune_in = [(n.pitches[0].midi, n.duration) for m in score.parts[0].measures
+               for n in m.voices.get(1, []) if n.pitches]
+    tune_out = [(n.pitches[0].midi, n.duration) for m in out.parts[0].measures
+                for n in m.voices.get(1, []) if n.pitches and n.staff == 1]
+    assert tune_out == tune_in
+    lh = [n for m in out.parts[0].measures for v in m.voices.values() for n in v
+          if n.pitches and n.staff == 2]
+    assert len(lh) >= 16

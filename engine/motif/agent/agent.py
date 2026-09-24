@@ -313,23 +313,23 @@ class MotifAgent:
         plan.key = str(info.key)
         plan.time = info.time
         plan.tempo = int(info.tempo)
-        style = resolve_style(plan.style if req.style else info.detected_style)
+        from ..compose.styles import match_styles
+        named = match_styles(req.prompt.lower())
+        style = resolve_style(req.style or (plan.style if named else info.detected_style))
         plan.style = style.name
-
-        import random
-        rng = random.Random(plan.seed)
         bars = max(1, existing.measure_count)
-        plan.sections = build_sections("through_composed", Key.parse(plan.key),
-                                       style, rng, bars)
-        _fit_section_bars(plan.sections, bars)
 
-        generated = compose(plan, self.model, progress=self.report)
+        from ..composer.harmonize import harmonize_score
+        generated, notes = harmonize_score(
+            existing, plan.style, quality=self.options.get("quality", "best"),
+            progress=self.report, seed=plan.seed, title=existing.title)
         merged = _graft_melody(existing, generated)
+        texture = notes[-1].split(": ", 1)[-1].split(" in the manner")[0] if notes else "flowing"
         message = _voice.harmonized_message(
-            plan, existing.title, bars, style, plan.sections[0].texture_lh, self.voice_model)
+            plan, existing.title, bars, style, texture, self.voice_model)
         return Result(ok=True, message=message,
             musicxml=to_musicxml(merged), midi=to_midi(merged), plan=plan,
-            preview=summarise(merged), analysis=analyse(merged).describe())
+            preview=summarise(merged), analysis=analyse(merged).describe(), notes=notes)
 
     def _edit(self, req: Request, existing: Score, info: ScoreAnalysis) -> Result:
         """Direct transformations of the score that is already there."""
