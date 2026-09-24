@@ -349,9 +349,11 @@ class Composer:
                                  idea_bar2=writer.motif.bar2 if roles and roles[0] == "idea"
                                  else "", response_shift=shift)
         harmony = plan_phrase(spec, hstyle, self.rng, tries=self.care.harmony_tries)
-        imitate = ps.texture == "imitation" and len(roles) > 1 and roles[1] == "idea2"
+        imitate = ps.texture in ("imitation", "fugato") and len(roles) > 1 and \
+            roles[1] == "idea2"
         if imitate:
-            harmony = _answer_harmony(harmony, t, self.bar)
+            harmony = _answer_harmony(harmony, t, self.bar,
+                                      steps=4 if ps.texture == "fugato" else 0)
         bass = _bass_line(harmony, self.prof.bass_low)
         low, high, top = mstyle.low, mstyle.high, mstyle.climax_high
         if self.ensemble in _arrange.LEAD_RANGE:
@@ -381,7 +383,8 @@ class Composer:
                             start_near=last_note if not ps.new_section else None,
                             low=low, high=high, energy=ps.energy, bass=bass, final=final,
                             anacrusis=anacrusis, prev_harmony=prev_h, tail_room=tail,
-                            response_shift=shift, imitate=imitate)
+                            response_shift=shift, imitate=imitate,
+                            imitate_drop=5 if ps.texture == "fugato" else 12)
             mel = writer.write(pp)
             sc = judge_melody(mel, pp) - 0.12 * writer.last_cost
             if _DEBUG_TAKES:
@@ -822,9 +825,12 @@ def _simplify(form: FormPlan, prof: Profile) -> FormPlan:
     return form
 
 
-def _answer_harmony(harmony: list[Harmony], start: F, bar: F) -> list[Harmony]:
+def _answer_harmony(harmony: list[Harmony], start: F, bar: F, steps: int = 0
+                    ) -> list[Harmony]:
     """In an invention the answer in the second bar carries the subject's
-    own harmony: bar 1's chords, again."""
+    own harmony: bar 1's chords, again — or, when the answer is at the fifth
+    (a fugue), those chords moved to the dominant."""
+    from .harmony import transpose_roman
     first = [h for h in harmony if h.onset < start + bar]
     rest = [h for h in harmony if h.onset >= start + 2 * bar]
     if not first or not rest:
@@ -835,7 +841,11 @@ def _answer_harmony(harmony: list[Harmony], start: F, bar: F) -> list[Harmony]:
         out.append(Harmony(h.roman, h.key, h.onset, d, pedal=h.pedal))
     for h in first:
         d = min(h.end, start + bar) - h.onset
-        out.append(Harmony(h.roman, h.key, h.onset + bar, d, pedal=h.pedal))
+        roman = transpose_roman(h.roman, steps, h.key) if steps else h.roman
+        if steps and roman.startswith(("ii%", "iio")):
+            roman = "V"           # the answer's harmony is the dominant, not its neighbour
+        out.append(Harmony(roman, h.key, h.onset + bar, d,
+                           pedal=None if steps else h.pedal))
     return out + rest
 
 

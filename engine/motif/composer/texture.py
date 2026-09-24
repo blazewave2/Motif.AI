@@ -478,17 +478,18 @@ REALISERS = {
 }
 
 
-def imitation(harmonies: list[Harmony], start: F, end: F, ctx: TextureContext) -> list[TexNote]:
+def imitation(harmonies: list[Harmony], start: F, end: F, ctx: TextureContext,
+              fifth: bool = False) -> list[TexNote]:
     """Two-part invention: the right hand states the subject alone, the left
-    hand answers it an octave or two lower a bar later, and then walks on in
-    counterpoint."""
+    hand answers it an octave or two lower a bar later — or, in a fugue, a
+    fifth lower, in the dominant — and then walks on in counterpoint."""
     bar = ctx.bar_len
     out: list[TexNote] = []
     subject = [n for n in ctx.melody if start <= n.onset < start + bar]
     if not subject or end - start < 3 * bar:
         return realise("walking", harmonies, start, end, ctx)
     top = max(n.midi for n in subject)
-    drop = 12
+    drop = 5 if fifth else 12
     while top - drop > 60:
         drop += 12
     for n in subject:
@@ -504,8 +505,8 @@ def imitation(harmonies: list[Harmony], start: F, end: F, ctx: TextureContext) -
 def realise(kind: str, harmonies: list[Harmony], start: F, end: F, ctx: TextureContext
             ) -> list[TexNote]:
     """Lay out every chord between ``start`` and ``end`` in texture ``kind``."""
-    if kind == "imitation":
-        return imitation(harmonies, start, end, ctx)
+    if kind in ("imitation", "fugato"):
+        return imitation(harmonies, start, end, ctx, fifth=(kind == "fugato"))
     out: list[TexNote] = []
     for i, h in enumerate(harmonies):
         a, b = max(h.onset, start), min(h.end, end)

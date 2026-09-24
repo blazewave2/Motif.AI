@@ -77,6 +77,11 @@ def plan_form(genre: str, prof: Profile, key: Key, target_bars: int,
     fn = _TEMPLATES.get(_genre_family(genre), _ternary)
     plan = fn(prof, key, max(8, target_bars), rng, character)
     plan.genre = genre or plan.genre
+    if "fugue" in genre or "fugato" in genre:
+        # a fugue answers its subject at the fifth, in the dominant
+        for p in plan.phrases:
+            if p.texture == "imitation":
+                p.texture = "fugato"
     _add_intro(plan, prof, target_bars, rng)
     return plan
 
