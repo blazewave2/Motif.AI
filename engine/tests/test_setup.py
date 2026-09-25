@@ -34,6 +34,84 @@ def test_install_and_remove_round_trip(tmp_path, monkeypatch):
     assert not (dest / "MotifAI").exists()
 
 
+def test_every_musescore_gets_the_panel(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(motif_setup.platform, "system", lambda: "Linux")
+    assert motif_setup.choose_plugin_dirs() == [tmp_path / "Documents" / "MuseScore4" / "Plugins"]
+    ms3 = tmp_path / ".local" / "share" / "MuseScore" / "MuseScore3" / "plugins"
+    ms4 = tmp_path / "Documents" / "MuseScore4" / "Plugins"
+    ms3.mkdir(parents=True)
+    ms4.mkdir(parents=True)
+    assert motif_setup.choose_plugin_dirs() == [ms4, ms3]
+
+
+def test_musescore_4_has_the_panel_switched_on(tmp_path, monkeypatch):
+    import json
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(motif_setup.platform, "system", lambda: "Linux")
+    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+    config = motif_setup.musescore4_extensions_config()
+    # MuseScore 4 never opened: nothing to switch on, nothing written
+    assert motif_setup.enable_in_musescore4() is False
+    assert not config.exists()
+    config.parent.mkdir(parents=True)
+    others = [{"actions": [], "uri": "musescore://extensions/colornotes"}]
+    config.write_text(json.dumps(others))
+    assert motif_setup.enable_in_musescore4() is True
+    entries = json.loads(config.read_text())
+    assert entries[0] == others[0]
+    assert {"actions": [{"code": "main", "exec_point": "manually"}],
+            "uri": "musescore://extensions/v1/motifai/motifai.qml"} in entries
+    # switched off again by hand, then repaired: on again, still listed once
+    entries[-1]["actions"] = []
+    config.write_text(json.dumps(entries))
+    assert motif_setup.enable_in_musescore4() is True
+    entries = json.loads(config.read_text())
+    assert len(entries) == 2 and entries[-1]["actions"]
+    motif_setup.forget_in_musescore4()
+    assert json.loads(config.read_text()) == others
+    # a file MuseScore writes differently is left alone
+    config.write_text('{"extensions": {}}')
+    assert motif_setup.enable_in_musescore4() is False
+    assert config.read_text() == '{"extensions": {}}'
+
+
+def test_musescore_3_has_the_panel_ticked(tmp_path, monkeypatch):
+    import xml.etree.ElementTree as ET
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(motif_setup.platform, "system", lambda: "Linux")
+    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+    folder = tmp_path / "Documents" / "MuseScore3" / "Plugins"
+    assert motif_setup.enable_in_musescore3(folder) is False     # never opened
+    data = tmp_path / ".local" / "share" / "MuseScore" / "MuseScore3"
+    data.mkdir(parents=True)
+    listing = data / "plugins.xml"
+    listing.write_text('<?xml version="1.0" encoding="UTF-8"?>\n<museScore version="3.02">'
+                       '<Plugin><path>/x/colornotes.qml</path><load>0</load></Plugin>'
+                       f'<Plugin><path>{folder.as_posix()}/MotifAI/MotifAI.qml</path>'
+                       '<load>0</load></Plugin></museScore>')
+    assert motif_setup.enable_in_musescore3(folder) is True
+    plugins = {p.findtext("path"): p.findtext("load")
+               for p in ET.parse(listing).getroot().findall("Plugin")}
+    assert plugins == {"/x/colornotes.qml": "0",
+                       f"{folder.as_posix()}/MotifAI/MotifAI.qml": "1"}
+    listing.unlink()
+    assert motif_setup.enable_in_musescore3(folder) is True
+    assert [p.findtext("load") for p in ET.parse(listing).getroot().findall("Plugin")] == ["1"]
+
+
+def test_a_translated_documents_folder_is_found(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(motif_setup.platform, "system", lambda: "Linux")
+    monkeypatch.delenv("XDG_DOCUMENTS_DIR", raising=False)
+    (tmp_path / ".config").mkdir()
+    (tmp_path / ".config" / "user-dirs.dirs").write_text(
+        '# written by xdg-user-dirs-update\nXDG_DOCUMENTS_DIR="$HOME/Dokumente"\n')
+    ms4 = tmp_path / "Dokumente" / "MuseScore4" / "Plugins"
+    ms4.mkdir(parents=True)
+    assert motif_setup.choose_plugin_dirs() == [ms4]
+
+
 def test_autostart_paths_stay_inside_the_home_folder():
     for path in (autostart._autostart_path(), autostart._plist_path(),
                  autostart._vbs_path()):
@@ -100,8 +178,9 @@ def machine(tmp_path, monkeypatch):
     calls = []
     state = {"up": False}
     monkeypatch.setattr(motif_setup, "_log", lambda text: None)
-    monkeypatch.setattr(motif_setup, "choose_plugin_dir", lambda: tmp_path)
+    monkeypatch.setattr(motif_setup, "choose_plugin_dirs", lambda: [tmp_path])
     monkeypatch.setattr(motif_setup, "install_plugin", lambda d: calls.append("panel"))
+    monkeypatch.setattr(motif_setup, "enable_in_musescore4", lambda: calls.append("enable"))
     monkeypatch.setattr(motif_setup, "prepare_config", lambda: calls.append("config"))
     monkeypatch.setattr(autostart, "is_running", lambda timeout=1.5: state["up"])
 
@@ -124,7 +203,7 @@ def test_install_runs_every_step_in_order(machine):
     calls, _ = machine
     messages = []
     assert motif_setup.run_install(lambda m, f: messages.append(m)) is True
-    assert calls == ["panel", "engine", "config", "login item", "start"]
+    assert calls == ["panel", "enable", "engine", "config", "login item", "start"]
     assert messages[-1] == "Motif is ready."
 
 

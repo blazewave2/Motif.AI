@@ -23,6 +23,8 @@ ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_SRC = ROOT / "plugin" / "MotifAI"
 PLUGIN_NAME = "MotifAI"
 LOG_PATH = Path.home() / ".motif" / "setup-log.txt"
+WHERE = ("Open MuseScore, then choose Motif.AI from the Plugins menu "
+         "(in MuseScore 4, under Composing/arranging tools).")
 
 BG = "#16181C"
 SURFACE = "#22262C"
@@ -39,26 +41,188 @@ OK_GREEN = "#7FBF8A"
 # ---------------------------------------------------------------------------
 # The work itself, independent of how it is presented
 # ---------------------------------------------------------------------------
-def musescore_plugin_dirs() -> list[Path]:
+def documents_dirs() -> list[Path]:
+    """Where MuseScore keeps its folders: the Documents folder as the system
+    names it (OneDrive's on many Windows computers, a translated name on some
+    Linux desktops), then the plain one."""
+    import os
     home = Path.home()
     system = platform.system()
-    out: list[Path] = []
+    found: list[Path] = []
     if system == "Windows":
-        import os
-        docs = Path(os.environ.get("USERPROFILE", home)) / "Documents"
+        try:
+            import ctypes
+            buf = ctypes.create_unicode_buffer(1024)
+            # CSIDL_PERSONAL: the Documents folder, wherever it has been moved
+            if ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, buf) == 0 and buf.value:
+                found.append(Path(buf.value))
+        except Exception:
+            pass
+        found.append(Path(os.environ.get("USERPROFILE") or home) / "Documents")
+    elif system == "Linux":
+        named = os.environ.get("XDG_DOCUMENTS_DIR") or _xdg_user_dir(home, "DOCUMENTS")
+        if named:
+            found.append(Path(named))
+    found.append(home / "Documents")
+    unique: list[Path] = []
+    for d in found:
+        if d not in unique:
+            unique.append(d)
+    return unique
+
+
+def _xdg_user_dir(home: Path, name: str) -> str:
+    """A folder from ~/.config/user-dirs.dirs (XDG_DOCUMENTS_DIR="$HOME/…")."""
+    try:
+        text = (home / ".config" / "user-dirs.dirs").read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    for line in text.splitlines():
+        key, eq, value = line.strip().partition("=")
+        if eq and key == f"XDG_{name}_DIR":
+            value = value.strip().strip('"').replace("$HOME", str(home))
+            return value if value.rstrip("/") != str(home) else ""
+    return ""
+
+
+def musescore_plugin_dirs() -> list[Path]:
+    home = Path.home()
+    out: list[Path] = []
+    for docs in documents_dirs():
         out += [docs / v / "Plugins" for v in ("MuseScore4", "MuseScore3")]
-    elif system == "Darwin":
-        out += [home / "Documents" / v / "Plugins" for v in ("MuseScore4", "MuseScore3")]
-    else:
-        out += [home / "Documents" / v / "Plugins" for v in ("MuseScore4", "MuseScore3")]
+    if platform.system() not in ("Windows", "Darwin"):
         out += [home / ".local" / "share" / "MuseScore" / v / "plugins"
                 for v in ("MuseScore4", "MuseScore3")]
     return out
 
 
+def choose_plugin_dirs() -> list[Path]:
+    """The plugin folder of each MuseScore on this computer (3 and 4 keep
+    their own), or MuseScore 4's when neither has been opened yet."""
+    chosen = []
+    for version in ("MuseScore4", "MuseScore3"):
+        found = [d for d in musescore_plugin_dirs() if version in d.parts and d.exists()]
+        if found:
+            chosen.append(found[0])
+    return chosen or [musescore_plugin_dirs()[0]]
+
+
 def choose_plugin_dir() -> Path:
-    existing = [d for d in musescore_plugin_dirs() if d.exists()]
-    return existing[0] if existing else musescore_plugin_dirs()[0]
+    return choose_plugin_dirs()[0]
+
+
+# MuseScore Studio 4.4 and later list a new plugin but leave it switched off
+# until it is enabled under Home → Plugins; Setup switches Motif on instead,
+# exactly as that page would.
+MS4_URI = f"musescore://extensions/v1/{PLUGIN_NAME.lower()}/{PLUGIN_NAME.lower()}.qml"
+MS4_ON = [{"code": "main", "exec_point": "manually"}]
+
+
+def musescore_data_dir(version: str) -> Path:
+    """MuseScore's own per-user data folder ("MuseScore4" or "MuseScore3")."""
+    import os
+    home = Path.home()
+    system = platform.system()
+    if system == "Windows":
+        base = Path(os.environ.get("LOCALAPPDATA") or home / "AppData" / "Local")
+    elif system == "Darwin":
+        base = home / "Library" / "Application Support"
+    else:
+        base = Path(os.environ.get("XDG_DATA_HOME") or home / ".local" / "share")
+    return base / "MuseScore" / version
+
+
+def musescore4_extensions_config() -> Path:
+    return musescore_data_dir("MuseScore4") / "extensions" / "config.json"
+
+
+def enable_in_musescore3(folder: Path) -> bool:
+    """Tick the panel in MuseScore 3's Plugin Manager, which lists a new
+    plugin unticked; False where MuseScore 3 hasn't been opened yet."""
+    import xml.etree.ElementTree as ET
+    listing = musescore_data_dir("MuseScore3") / "plugins.xml"
+    if not listing.parent.is_dir():
+        return False
+    qml = (folder / PLUGIN_NAME / f"{PLUGIN_NAME}.qml").as_posix()
+    if listing.exists():
+        try:
+            tree = ET.parse(listing)
+        except (ET.ParseError, OSError):
+            return False
+        root = tree.getroot()
+        if root.tag != "museScore":
+            return False
+    else:
+        root = ET.Element("museScore", version="3.02")
+        tree = ET.ElementTree(root)
+    for plugin in root.findall("Plugin"):
+        if (plugin.findtext("path") or "") == qml:
+            load = plugin.find("load")
+            if load is None:
+                load = ET.SubElement(plugin, "load")
+            if load.text == "1":
+                return True
+            load.text = "1"
+            break
+    else:
+        plugin = ET.SubElement(root, "Plugin")
+        ET.SubElement(plugin, "path").text = qml
+        ET.SubElement(plugin, "load").text = "1"
+    try:
+        tree.write(listing, encoding="UTF-8", xml_declaration=True)
+    except OSError:
+        return False
+    return True
+
+
+def _musescore4_entries(path: Path) -> list | None:
+    """MuseScore 4's list of plugins and whether each is on, or None where
+    it can't be read as one (an older MuseScore 4, or a newer format)."""
+    import json
+    if not path.parent.is_dir():
+        return None
+    try:
+        entries = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+    except (OSError, ValueError):
+        return None
+    return entries if isinstance(entries, list) else None
+
+
+def enable_in_musescore4() -> bool:
+    """Switch the panel on in MuseScore 4, where MuseScore 4 keeps that
+    choice; False where it can't be (the musician then enables it by hand)."""
+    import json
+    path = musescore4_extensions_config()
+    entries = _musescore4_entries(path)
+    if entries is None:
+        return False
+    for entry in entries:
+        if isinstance(entry, dict) and entry.get("uri") == MS4_URI:
+            if entry.get("actions"):
+                return True
+            entry["actions"] = MS4_ON
+            break
+    else:
+        entries.append({"actions": MS4_ON, "uri": MS4_URI})
+    try:
+        path.write_text(json.dumps(entries, indent=2), encoding="utf-8")
+    except OSError:
+        return False
+    return True
+
+
+def forget_in_musescore4() -> None:
+    import json
+    path = musescore4_extensions_config()
+    entries = _musescore4_entries(path)
+    if not entries:
+        return
+    kept = [e for e in entries if not (isinstance(e, dict) and e.get("uri") == MS4_URI)]
+    if len(kept) != len(entries):
+        try:
+            path.write_text(json.dumps(kept, indent=2), encoding="utf-8")
+        except OSError:
+            pass
 
 
 def install_plugin(target_dir: Path) -> Path:
@@ -99,7 +263,11 @@ def run_install(report) -> bool:
         _wait_until(lambda: not autostart.is_running(0.5), 8)
 
     report("Installing the Motif panel…", 0.08)
-    install_plugin(choose_plugin_dir())
+    for folder in choose_plugin_dirs():
+        install_plugin(folder)
+        if "MuseScore3" in folder.parts:
+            enable_in_musescore3(folder)
+    enable_in_musescore4()
 
     # Copied to a permanent, per-user location rather than run from wherever
     # Setup itself happens to be sitting — Setup is an installer, and an
@@ -138,6 +306,7 @@ def run_remove(report) -> None:
     report("Removing the login item…", 0.3)
     autostart.remove()
     report("Removing the panel…", 0.45)
+    forget_in_musescore4()
     for d in musescore_plugin_dirs():
         dest = d / PLUGIN_NAME
         if dest.is_symlink():
@@ -229,7 +398,7 @@ def run_window() -> int:
         primary.config(text="Done", bg=OK_GREEN if ok else SURFACE,
                        fg=INK if ok else TEXT)
         footer.config(
-            text=("Open MuseScore, then choose Motif.AI from the Plugins menu."
+            text=(WHERE
                   if ok else
                   "Motif is installed. If the panel stays quiet, open this "
                   "window again and choose Repair."))
@@ -263,7 +432,7 @@ def run_window() -> int:
         status.config(text="Motif is installed and ready.")
         primary.config(text="Repair")
         set_progress(1.0)
-        footer.config(text="Open MuseScore, then choose Motif.AI from the Plugins menu.")
+        footer.config(text=WHERE)
     elif autostart.is_installed():
         status.config(text="Motif is installed but not running.")
         primary.config(text="Repair")
@@ -391,7 +560,7 @@ def run_console(argv: list[str]) -> int:
         print("\n  Removed.\n")
         return 0
     ok = run_install(report)
-    print("\n  Open MuseScore, then choose Motif.AI from the Plugins menu.\n"
+    print(f"\n  {WHERE}\n"
           if ok else "\n  Installed. Open this again and choose Repair if needed.\n")
     return 0 if ok else 1
 
@@ -414,8 +583,7 @@ def _run_headless(want_remove: bool) -> int:
         ok = run_install(report)
         if ok:
             _native_alert(f"{APP} Setup",
-                (last["message"] or "Motif is installed and ready.") + "\n\n"
-                "Open MuseScore, then choose Motif.AI from the Plugins menu.")
+                (last["message"] or "Motif is installed and ready.") + "\n\n" + WHERE)
         else:
             _native_alert(f"{APP} Setup",
                 "Motif is installed, but hasn\u2019t answered yet.\n\n"

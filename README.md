@@ -31,7 +31,10 @@ no language model.
 1. Open the **Install Motif** folder and double-click the item for your
    computer.
 2. Choose **Install**. It takes a few seconds.
-3. Open MuseScore and choose **Motif.AI** from the Plugins menu.
+3. Open MuseScore and choose **Motif.AI** from the Plugins menu. In
+   MuseScore 4 it is under **Composing/arranging tools**; Setup switches it on
+   for you, and if it is ever missing there, turn it on under
+   **Home → Plugins**.
 
 That's all of it. Motif starts with your computer from then on, so the panel is
 ready whenever MuseScore is. Nothing is typed, and nothing leaves your machine.
