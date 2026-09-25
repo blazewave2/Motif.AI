@@ -92,6 +92,12 @@ function plan(base, token, payload, onDone) {
     return request(base, token, "POST", "/plan", payload, onDone);
 }
 
+// Hosts whose plugins cannot open a score (version 4) ask the engine to
+// open it with the program the panel is running in.
+function openScore(base, token, payload, onDone) {
+    return request(base, token, "POST", "/open", payload, onDone);
+}
+
 // Preferences has no lists to populate — composer and instrumentation are
 // never chosen from a menu, only asked for in the prompt.
 function savePrefs(base, token, prefs, onDone) {

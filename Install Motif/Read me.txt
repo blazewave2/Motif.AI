@@ -9,7 +9,8 @@ Double-click the item for your computer:
 
 Setup adds Motif to MuseScore and sets it to start with your
 computer. Then open MuseScore and choose Motif.AI from the
-Plugins menu.
+Plugins menu (in MuseScore 4 it is under Composing/arranging
+tools; if it is missing there, switch it on under Home > Plugins).
 
 Motif's composer runs entirely on your computer: no account, no
 internet connection, and nothing you write or open is ever sent

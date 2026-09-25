@@ -22,7 +22,8 @@ from ..plan import CompositionPlan
 from ..score import Score
 from ..theory.pitch import Key, Pitch
 from .form import (SCOPE_BARS, FormPlan, PhraseSpec, choose_metre, detect_genre, detect_scope,
-                   genre_family, melody_only, plan_form)
+                   dynamic_ceiling, genre_family, keep_off_the_dance_floor, melody_only,
+                   plan_form)
 from .harmony import (Harmony, PhraseHarmonySpec, fix_parallels, harmony_at, harmony_style,
                       plan_phrase, revise, spell)
 from .melody import (GENRE_CELLS, MelNote, Motif, MelodyWriter, PhrasePlan, _random_motif,
@@ -193,6 +194,7 @@ class Composer:
             options = {"count": count or (4 if large else 5), "long_theme": large}
         form = plan_form(self.genre, prof, self.key, target, self.rng, plan.character,
                          **options)
+        keep_off_the_dance_floor(form, self.genre, self.time, prof)
         if getattr(plan, "length_bars", 0) and not self.scope and self.family != "variations":
             _fit_length(form, plan.length_bars)
         self._fit_section_tempi(form)
@@ -920,12 +922,13 @@ class Composer:
         prof = self.prof
         ps = w.spec
         at = w.melody[0].onset if w.melody else w.start
-        dyn = _energy_dynamic(prof, ps.energy)
+        ceiling = dynamic_ceiling(self.genre)
+        dyn = _energy_dynamic(prof, ps.energy, ceiling)
         if ps.role == "closing" and ps.section == "coda":
             dyn = prof.dynamics[0]
         elif ps.role == "transition":
             # a passage leading home starts below where it is going and grows
-            dyn = _energy_dynamic(prof, max(0.3, ps.energy - 0.3))
+            dyn = _energy_dynamic(prof, max(0.3, ps.energy - 0.3), ceiling)
         if first or ps.new_section or dyn != self._last_dyn:
             (rh if w.melody else lh).marks.append(Mark(at, "dyn", dyn))
             self._last_dyn = dyn
@@ -1518,11 +1521,20 @@ def _texture_to_voices(tex: list[TexNote], harmony: list[Harmony], lh: Voice, rh
         (rh2 if n.staff == "RH" else lh).add(note)
 
 
-def _energy_dynamic(prof: Profile, energy: float) -> str:
+def _energy_dynamic(prof: Profile, energy: float, ceiling: str = "") -> str:
+    """The dynamic for a passage's energy, within the composer's range — and,
+    for an intimate kind of piece, within its ``ceiling``, the whole scale
+    drawn in beneath it so that the climax still stands out."""
     lo = _DYNAMICS.index(prof.dynamics[0])
     hi = _DYNAMICS.index(prof.dynamics[1])
+    top = _DYNAMICS.index(prof.climax_dynamic)
+    if ceiling:
+        cap = _DYNAMICS.index(ceiling)
+        top = min(top, cap)
+        hi = min(hi, max(lo, top - 1))
+        lo = min(lo, hi)
     if energy >= 0.93:
-        return prof.climax_dynamic
+        return _DYNAMICS[top]
     idx = lo + round((hi - lo) * max(0.0, min(1.0, (energy - 0.15) / 0.7)))
     return _DYNAMICS[idx]
 
