@@ -887,6 +887,96 @@ def revise(harmonies: list[Harmony], melody, style: HarmonyStyle, key: Key, beat
     return _merge_repeats(out)
 
 
+def _inversions(roman: str) -> list[str]:
+    """The same chord with another note in the bass: a triad in first
+    inversion (or back in root position), a seventh chord in any position."""
+    import re
+    head, slash, target = roman.partition("/")
+    if "(" in head or head[:2] in ("It", "Fr", "Ge", "Ca") or head.startswith("N"):
+        return []
+    m = re.match(r"^([b#]?[ivIV]+[o%+]?)(\d*)(b9)?$", head)
+    if not m:
+        return []
+    base, fig, flat9 = m.groups()
+    if flat9:
+        return []
+    figs = {"": ["6"], "6": [""], "64": ["", "6"], "7": ["65", "43", "42"],
+            "65": ["7", "43"], "43": ["7", "65"], "42": ["7", "65"]}.get(fig, [])
+    return [base + f + slash + target for f in figs]
+
+
+def fix_parallels(harmonies: list[Harmony], melody, beat: F, key: Key,
+                  protect: int = 1) -> list[Harmony]:
+    """Parallel octaves or fifths between the tune and the bass, where the
+    chord changes, are taken out the way a composer takes them out: by
+    putting another note of the chord in the bass. The cadence (the last
+    ``protect`` chords) and the phrase's first chord keep their bass."""
+    notes = sorted(melody, key=lambda n: n.onset)
+    if not notes:
+        return harmonies
+    out = list(harmonies)
+
+    def sounding(t: F):
+        cur = None
+        for n in notes:
+            if n.onset <= t < n.onset + n.dur:
+                return n
+            if n.onset < t:
+                cur = n
+        return cur
+
+    def before(t: F):
+        cur = None
+        for n in notes:
+            if n.onset < t:
+                cur = n
+        return cur
+
+    def parallel(h0: Harmony, h1: Harmony) -> bool:
+        b = sounding(h1.onset)
+        if b is None or h0.bass_pc == h1.bass_pc:
+            return False
+        # the note just before the change, and the one on the last beat
+        # before it (parallels by accent are heard too)
+        last_beat = h1.onset - beat if (h1.onset - h0.onset) >= beat else h0.onset
+        for a in {id(x): x for x in (before(h1.onset), sounding(last_beat))
+                  if x is not None}.values():
+            if a is b or a.midi == b.midi:
+                continue
+            iv0, iv1 = (a.midi - h0.bass_pc) % 12, (b.midi - h1.bass_pc) % 12
+            if iv0 != iv1 or iv0 not in (0, 7):
+                continue
+            d = (h1.bass_pc - h0.bass_pc) % 12
+            bass_dir = 1 if 0 < d <= 6 else -1
+            if (b.midi > a.midi) == (bass_dir > 0):
+                return True
+        return False
+
+    last_free = len(out) - protect
+    for i in range(1, len(out)):
+        if not parallel(out[i - 1], out[i]):
+            continue
+        fixed = False
+        for j in ([i] if i < last_free else []) + ([i - 1] if i - 1 > 0 else []):
+            for label in _inversions(out[j].roman):
+                try:
+                    cand = Harmony(label, key, out[j].onset, out[j].dur, pedal=out[j].pedal,
+                                   cadence=out[j].cadence)
+                except Exception:
+                    continue
+                trial = out[:j] + [cand] + out[j + 1:]
+                bad = parallel(trial[i - 1], trial[i]) or \
+                    (j > 0 and parallel(trial[j - 1], trial[j])) or \
+                    (j + 1 < len(trial) and parallel(trial[j], trial[j + 1]))
+                if not bad:
+                    out = trial
+                    fixed = True
+                    break
+            if fixed:
+                break
+    return out
+
+
 def _melody_weights(notes, h: Harmony, beat: F) -> list[tuple[int, float]]:
     """(pitch class, weight) of each melody note sounding over ``h``: how
     long it sounds, more if it starts on a beat, much less if it is a short

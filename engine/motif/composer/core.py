@@ -23,8 +23,8 @@ from ..score import Score
 from ..theory.pitch import Key, Pitch
 from .form import (SCOPE_BARS, FormPlan, PhraseSpec, choose_metre, detect_genre, detect_scope,
                    genre_family, melody_only, plan_form)
-from .harmony import (Harmony, PhraseHarmonySpec, harmony_at, harmony_style, plan_phrase,
-                      revise, spell)
+from .harmony import (Harmony, PhraseHarmonySpec, fix_parallels, harmony_at, harmony_style,
+                      plan_phrase, revise, spell)
 from .melody import (GENRE_CELLS, MelNote, Motif, MelodyWriter, PhrasePlan, _random_motif,
                      implied_harmony,
                      invent_motif, melody_style, motif_score, respell_line, roles_for)
@@ -285,6 +285,7 @@ class Composer:
                                "seed": plan.seed, "prompt": plan.prompt,
                                "character": plan.character, "ensemble": self.ensemble})
         self.msn = msn
+        self.written = written              # kept for review and tests
         return score
 
     def _audition(self, form: FormPlan, hstyle, mstyle) -> Motif:
@@ -499,6 +500,9 @@ class Composer:
             body = [n for n in best if n.onset >= t]
             cad = 3 if ps.cadence in ("PAC", "IAC", "HC", "plagal", "DC") else 1
             harmony = revise(harmony, body, hstyle, ps.key, self.beat, protect=cad)
+            if not harmony[0].pedal and all(h.pedal is None for h in harmony):
+                harmony = fix_parallels(harmony, body, self.beat, ps.key,
+                                        protect=2 if cad > 1 else 1)
             for n in body:
                 n.pitch = spell(n.midi, harmony_at(harmony, n.onset))
             respell_line(body, harmony, ps.key)

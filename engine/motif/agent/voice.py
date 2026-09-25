@@ -62,7 +62,7 @@ def _pretty_roman(label: str) -> str:
     if "(" in head:
         head, colour = head.split("(", 1)
         colour = " " + colour.rstrip(")")
-    m = re.match(r"^([b#]?[ivIV]+|N|It|Fr|Ger)([o%+]?)(\d*)(.*)$", head)
+    m = re.match(r"^(It|Fr|Ger|N|[b#]?[ivIV]+)([o%+]?)(\d*)(.*)$", head)
     if not m:
         return label
     numeral, quality, fig, rest = m.groups()
