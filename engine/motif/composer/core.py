@@ -141,6 +141,7 @@ class Composer:
             if self.scope == "cadenza":
                 self.tempo, self.tempo_text = 96, "Liberamente"
         self._last_dyn: str | None = None
+        self._last_dyn_at: F | None = None
         self._figures: set = set()               # figurations the variations have used
         #: a piece for a learner: plain rhythms, an easy left hand, no ornaments
         self.simple = "simplified" in (plan.notes or "")
@@ -965,9 +966,14 @@ class Composer:
         elif ps.role == "transition":
             # a passage leading home starts below where it is going and grows
             dyn = _energy_dynamic(prof, max(0.3, ps.energy - 0.3), ceiling)
-        if first or ps.new_section or dyn != self._last_dyn:
+        # a new section restates its level only as a reminder, not a bar
+        # after the same marking (an introduction's mp and the tune's)
+        reminder = ps.new_section and (self._last_dyn_at is None or
+                                       at - self._last_dyn_at >= 4 * self.bar)
+        if first or dyn != self._last_dyn or reminder:
             (rh if w.melody else lh).marks.append(Mark(at, "dyn", dyn))
             self._last_dyn = dyn
+            self._last_dyn_at = at
         if ps.words and ps.words.lower() != (self.tempo_text or "").lower():
             rh.marks.append(Mark(at, "text", ps.words))
         mel = [n for n in w.melody if n.onset >= w.start]
