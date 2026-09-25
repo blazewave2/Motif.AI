@@ -140,6 +140,26 @@ version on screen while the file underneath it changed risks the next save
 overwriting Motif's work. A genuinely new, unrelated piece — even while a
 score happens to be open — always gets its own file.
 
+**MuseScore 4 reads the open score through the cursor.** MuseScore 4's
+plugins cannot save a score either (`writeScore()` is not implemented), so
+the panel reads the page with MuseScore's cursor instead
+(`plugin/MotifAI/js/snapshot.js`) and sends the engine a snapshot:
+- every chord and rest with its exact timing, spelled pitches (from the
+  tonal pitch class), ties and tuplet;
+- each bar's time signature and real length (so a pickup is known);
+- the key signature bar by bar, and the tempo and dynamic markings.
+
+`engrave/snapshot.py` rebuilds a `Score` from it in the shape the MusicXML
+reader gives, so every intent works the same on either MuseScore. Two things
+the page doesn't say are worked out:
+- **Mode:** MuseScore does not record a key's mode, so whether four sharps
+  are E major or C♯ minor is judged from the notes under that signature,
+  with the closing bass counting double.
+- **Clefs:** each staff's clef comes from where its music lies.
+
+A continuation carries on from where the piece has got to: its last key,
+metre and tempo, which need not be the ones it began with.
+
 **MuseScore 4 opens the score through the engine.** MuseScore 4's plugin
 API has no working `readScore()`, so there the panel posts the finished
 file's path to `/open` together with the path of the program it is running

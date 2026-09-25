@@ -1,0 +1,25 @@
+title: Probe Piece
+key: Db major
+time: 3/4
+tempo: 60 "Larghetto"
+part: Pno piano
+
+m0
+  RH: !p Ab4:q
+  LH: r:q
+m1
+  RH: (Db5:e Eb5:e F5:h~
+  LH: !ped Db2:q [Ab2 F3]:q [Ab2 F3]:q
+m2
+  RH: F5:q {3 Gb5:e F5:e Eb5:e} Db5:q)
+  RH2: Ab4:h.
+  LH: Ab1:q [Ab2 Gb3 C4]:q [Ab2 Gb3 C4]:q
+m3 time=6/8 tempo=72 "Più mosso"
+  RH: !f {acc Eb5:s} Db5:e C5:e Bb4:e Ab4:q.
+  LH: [Db2 Db3]:q. [Ab2 F3]:q.
+m4 key="A major"
+  RH: [C#5 E5 A5]:q. r:q.
+  LH: R
+m5 barline=final
+  RH: A4:q.~ A4:q.
+  LH: [A1 A2]:q. [E2 E3]:q.

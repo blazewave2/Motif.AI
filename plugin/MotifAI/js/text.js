@@ -8,9 +8,14 @@
 // the global one, which URL-encodes, even from inside this file.
 .pragma library
 
-var shortcutHint = "MuseScore doesn't let a plugin add its own toolbar button, "
-    + "but you can give Motif a one-key shortcut instead: open "
-    + "Plugins → Manage Plugins, select Motif.AI, and choose Define Shortcut.";
+// Where each MuseScore keeps a plugin's keyboard shortcut.
+function shortcutHint(major) {
+    var where = major >= 4
+        ? "open Plugins → Manage plugins, click Motif.AI, and choose Edit shortcut."
+        : "open Plugins → Plugin Manager, select Motif.AI, and choose Define Shortcut.";
+    return "MuseScore doesn't let a plugin add its own toolbar button, but you can give "
+         + "Motif a one-key shortcut instead: " + where;
+}
 
 function escapeMarkup(s) {
     return String(s === undefined || s === null ? "" : s)

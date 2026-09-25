@@ -16,6 +16,7 @@ Item {
     id: panel
     property bool autoOpen: true
     property string versionText: ""
+    property int hostMajor: 3                  // the host version the panel runs in
     property bool connected: false
     property string quality: "best"
 
@@ -123,7 +124,7 @@ Item {
                 wrapMode: Text.WordWrap
                 // (the wording lives in text.js: a component file that names
                 // the host is taken for a plugin of its own by version 4)
-                text: Txt.shortcutHint
+                text: Txt.shortcutHint(panel.hostMajor)
                 color: T.textMuted
                 font.family: T.sans
                 font.pixelSize: T.fsSmall

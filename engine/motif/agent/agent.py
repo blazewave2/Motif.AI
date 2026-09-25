@@ -22,6 +22,7 @@ from ..engrave.beaming import apply_beams
 from ..engrave.midi import to_midi
 from ..engrave.musicxml import to_musicxml
 from ..engrave.musicxml_reader import read_musicxml
+from ..engrave.snapshot import score_from_snapshot
 from ..engrave.preview import summarise
 from ..plan import CompositionPlan, InstrumentPlan, SectionPlan
 from ..score import Part, Score
@@ -77,6 +78,9 @@ _ANALYZE_WORDS = ("analyze", "analyse", "what key", "what is this", "describe",
 class Request:
     prompt: str = ""
     score_xml: str | None = None
+    #: The open score as the panel read it with MuseScore's cursor, where
+    #: MuseScore cannot save it as MusicXML (MuseScore 4).
+    score_snapshot: dict | None = None
     score_path: str | None = None        # the open score's own file, if it has one
     selection_start: int | None = None   # 1-based bar numbers
     selection_end: int | None = None
@@ -171,6 +175,11 @@ class MotifAgent:
                     # An unreadable score is not fatal: fall back to treating
                     # the request as a fresh piece rather than refusing it.
                     existing = None
+            elif req.score_snapshot:
+                try:
+                    existing = score_from_snapshot(req.score_snapshot)
+                except Exception:
+                    existing = None
             info = analyse(existing) if existing is not None else None
             open_score_empty = False
             if info is not None and info.is_empty:
@@ -189,6 +198,9 @@ class MotifAgent:
             result.open_score_empty = open_score_empty
             if existing is not None and intent != "create":
                 result.based_on = "open_score"
+                # the musician's own piece keeps its name, whatever was done to it
+                if not result.title and existing.title not in ("", "Untitled"):
+                    result.title = existing.title
             if not result.title and result.plan is not None:
                 result.title = result.plan.title
         except Cancelled:
@@ -271,11 +283,13 @@ class MotifAgent:
         # explicitly override; continuing in a different key is not continuing,
         # and continuing a concerto is not continuing it as a solo piano line.
         stated_tonic, stated_mode = parse_key(req.prompt.lower(), req.prompt)
+        # carrying on means carrying on from where the piece has got to: its
+        # last key, metre and tempo, which may not be the ones it began with
         if not stated_tonic:
-            plan.key = str(info.key)
-        plan.time = info.time
+            plan.key = str(info.end_key or info.key)
+        plan.time = info.end_time or info.time
         if not re.search(r"\d{2,3}\s*bpm", req.prompt.lower()):
-            plan.tempo = int(info.tempo)
+            plan.tempo = int(round(info.end_tempo or info.tempo))
         if not any(s in req.prompt.lower() for s in ("style of", "like ", "in the manner")):
             plan.style = info.detected_style
         style = resolve_style(plan.style)

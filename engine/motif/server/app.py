@@ -334,6 +334,8 @@ def _run(state: MotifState, body: dict, job) -> dict:
     req = Request(
         prompt=prompt,
         score_xml=body.get("score_xml") or None,
+        score_snapshot=body.get("score_snapshot") if isinstance(body.get("score_snapshot"),
+                                                                dict) else None,
         score_path=body.get("score_path") or None,
         seed=body.get("seed"),
         style=body.get("style") or None,

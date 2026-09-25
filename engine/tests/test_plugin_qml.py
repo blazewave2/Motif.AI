@@ -200,3 +200,78 @@ def test_on_musescore_4_the_engine_opens_the_score(panel, monkeypatch):
     texts = [panel.js(f"conversation.get({i}).text") for i in range(int(panel.js("conversation.count")))]
     assert not [t for t in texts if "didn’t appear" in t]
 
+
+
+# A two-bar piano score as MuseScore's plugin API presents it: bars, parts
+# and a cursor that steps through each track's chords and rests.
+_FAKE_SCORE = """
+(function () {
+    var events = {
+        0: [[0, 960, [[72, 14, 0, 0]]], [960, 960, [[74, 16, 1, 0]]],
+            [1920, 960, [[74, 16, 0, 1]]], [2880, 960, [[76, 18, 0, 0]]]],
+        4: [[0, 1920, [[48, 14, 0, 0], [55, 15, 0, 0]]], [1920, 1920, [[43, 15, 0, 0]]]]
+    };
+    function frac(t) { return { ticks: t, numerator: t / 120, denominator: 16 }; }
+    var m2 = { firstSegment: { tick: 1920 }, timesigActual: frac(1920),
+               timesigNominal: { numerator: 4, denominator: 4, ticks: 1920 }, nextMeasure: null };
+    var m1 = { firstSegment: { tick: 0 }, timesigActual: frac(1920),
+               timesigNominal: { numerator: 4, denominator: 4, ticks: 1920 }, nextMeasure: m2 };
+    function cursor() {
+        return {
+            track: 0, i: 0, list: [], segment: null, element: null, tick: 0, keySignature: 0,
+            rewind: function () { this.list = events[this.track] || []; this.i = 0; this.sync(); },
+            sync: function () {
+                var e = this.list[this.i];
+                if (!e) { this.segment = null; this.element = null; return; }
+                this.tick = e[0];
+                var tempo = { type: Element.TEMPO_TEXT, track: 0, tempo: 1.5,
+                              text: "<b>Andante</b> = 90" };
+                this.segment = { annotations: (e[0] === 0 && this.track === 0) ? [tempo] : [] };
+                this.element = { type: Element.CHORD, tuplet: null, duration: frac(e[1]),
+                                 actualDuration: frac(e[1]),
+                                 notes: e[2].map(function (n) {
+                                     return { pitch: n[0], tpc: n[1], tieForward: !!n[2],
+                                              tieBack: !!n[3] }; }) };
+            },
+            next: function () { this.i += 1; this.sync(); return !!this.segment; },
+            nextMeasure: function () {
+                var end = (Math.floor(this.tick / 1920) + 1) * 1920;
+                while (this.segment && this.tick < end) { this.i += 1; this.sync(); }
+                return !!this.segment;
+            }
+        };
+    }
+    root.curScore = {
+        title: "Two Bars", metaTag: function () { return ""; }, ntracks: 8,
+        parts: [{ longName: "Piano", partName: "Piano", shortName: "Pno.", instrumentId: "piano",
+                  midiProgram: 0, startTrack: 0, endTrack: 8 }],
+        firstMeasure: m1, newCursor: cursor
+    };
+})()
+"""
+
+
+def test_on_musescore_4_the_panel_reads_the_open_score_itself(panel):
+    """MuseScore 4 cannot save the score for the panel, so the panel walks
+    it with the cursor and sends what it finds."""
+    seen = []
+    real = panel.state.agent.run
+
+    def run(req, progress=None):
+        seen.append(req)
+        return real(req, progress)
+    panel.state.agent.run = run
+    panel.js("root.mscoreMajorVersion = 4")
+    panel.js(_FAKE_SCORE)
+    panel.call("send", "Continue this piece", False)
+    assert panel.spin(lambda: not panel.prop("busy"), 120)
+    req = seen[0]
+    assert not req.score_xml
+    snap = req.score_snapshot
+    assert snap["format"] == "motif-snapshot-1" and snap["title"] == "Two Bars"
+    assert [e[1] for e in snap["events"] if e[0] == 0] == [0, 960, 1920, 2880]
+    assert snap["tempos"] == [[0, 90, "<b>Andante</b> = 90"]]
+    assert snap["keys"] == [[0, 0], [1920, 0]]
+    n = int(panel.js("conversation.count"))
+    assert panel.js(f"conversation.get({n - 1}).role") == "assistant"
+    assert "Two Bars" in panel.js(f"conversation.get({n - 1}).text")

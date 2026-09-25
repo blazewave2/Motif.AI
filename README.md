@@ -112,9 +112,11 @@ first: every setting goes through every stage.
 
 Everything happens on your computer. Motif listens only to MuseScore, on your
 own machine, and your music is never sent anywhere. Asking Motif to continue,
-develop or change a piece you already have open writes the result back into
-that same file — it never leaves a second copy somewhere you'd have to go
-find.
+develop, harmonise, arrange or change a piece you already have open works from
+the music on your page. When that piece is a MusicXML file and MuseScore can
+reload it (MuseScore 3), the result is written back into that same file.
+Otherwise it opens as a new score beside yours, and your own file is never
+touched.
 
 ## For developers
 

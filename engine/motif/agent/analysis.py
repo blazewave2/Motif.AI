@@ -25,6 +25,11 @@ class ScoreAnalysis:
     ornament_rate: float = 0.0
     tempo_span: float = 0.0
     last_melody_pitch: Pitch | None = None
+    #: Where the piece has got to by its last bar — the key, metre and tempo
+    #: a continuation picks up from (the tempo in beats of that metre).
+    end_key: Key | None = None
+    end_time: tuple[int, int] | None = None
+    end_tempo: float | None = None
     final_chord_pcs: tuple[int, ...] = ()
     detected_style: str = "classical"
     style_is_exact: bool = False        # read from the file, not guessed
@@ -88,6 +93,7 @@ def analyse(score: Score) -> ScoreAnalysis:
     a.last_melody_pitch = last
 
     a.key = detect_key(pitches, score.key)
+    _read_the_ending(a, score)
     a.chromaticism = sum(1 for p in pitches if p % 12 not in set(a.key.scale_pcs)) / len(pitches)
 
     # A score Motif itself wrote carries its exact composer and forces as
@@ -107,6 +113,35 @@ def analyse(score: Score) -> ScoreAnalysis:
     if a.chord_summary:
         a.final_chord_pcs = tuple(sorted({p % 12 for p in pitches[-6:]}))
     return a
+
+
+def _read_the_ending(a: ScoreAnalysis, score: Score) -> None:
+    """The key, metre and tempo in force at the end of the piece. A piece that
+    has changed its key signature is heard in its new key from its last bars;
+    one that has not keeps the key found for the whole piece."""
+    top = score.parts[0]
+    sig, time = score.key, tuple(score.time)
+    for m in top.measures:
+        if m.key is not None:
+            sig = m.key
+        if m.time:
+            time = tuple(m.time)
+    a.end_time = time
+    if sig.fifths == score.key.fifths:
+        a.end_key = a.key
+    else:
+        tail = [p.midi for part in score.parts for m in part.measures[-8:]
+                for notes in m.voices.values() for n in notes if not n.grace
+                for p in n.pitches]
+        a.end_key = detect_key(tail, sig) if len(tail) >= 8 else sig
+        if a.end_key.fifths != sig.fifths:
+            a.end_key = sig             # the signature's own major or minor, never another
+    visible = [t for t in score.tempos if t.visible] or list(score.tempos)
+    if visible:
+        last = max(visible, key=lambda t: (t.measure, t.offset))
+        beats, unit = time
+        per_beat = 1.5 if (unit == 8 and beats % 3 == 0 and beats > 3) else 4.0 / unit
+        a.end_tempo = round(last.quarter_bpm / per_beat, 2)
 
 
 #: Krumhansl-Schmuckler style weights, normalised for tonal music.

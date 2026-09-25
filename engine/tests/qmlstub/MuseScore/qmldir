@@ -1,2 +1,3 @@
 module MuseScore
 MuseScore 3.0 MuseScore.qml
+singleton Element 3.0 Element.qml
