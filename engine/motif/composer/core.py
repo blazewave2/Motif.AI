@@ -32,7 +32,7 @@ from .notation import (BarInfo, Mark, Note, Sheet, Voice, bar_length, beat_lengt
                        group_tuplets as _group_tuplets)
 from .profiles import Profile, choose_tempo, named_composer, profile
 from .texture import TexNote, TextureContext, final_chord, realise
-from .variation import change_mode, figurate, to_tenor
+from .variation import change_mode, figurate, parallel_key, to_tenor
 from . import arrange as _arrange
 
 
@@ -517,40 +517,18 @@ class Composer:
             semis = (ps.key.tonic_pc - src.spec.key.tonic_pc) % 12
             if semis > 6:
                 semis -= 12
-        mode_change = ps.variation in ("minore", "maggiore")
-        # a change of mode is made from the theme as it was, chord by chord
-        hkey = src.spec.key if mode_change else ps.key
+        # a change of mode — a minore, or a major theme recapitulated in a
+        # minor key — is made from the theme as it was, chord by chord
+        mode_change = ps.variation in ("minore", "maggiore") or \
+            src.spec.key.is_minor != ps.key.is_minor
+        hkey = parallel_key(ps.key) if mode_change else ps.key
         harmony = [Harmony(h.roman, hkey, h.onset + shift, h.dur, pedal=(
             (h.pedal + semis) % 12 if h.pedal is not None else None), cadence=h.cadence)
             for h in src.harmony]
-        if ps.cadence != src.spec.cadence and harmony:
-            # the return closes where the original only paused
-            last = harmony[-1]
-            tonic = "I" if not ps.key.is_minor else "i"
-            if ps.cadence in ("PAC", "plagal", "DC"):
-                arrival = tonic if ps.cadence != "DC" else ("VI" if ps.key.is_minor else "vi")
-                harmony[-1] = Harmony(arrival, ps.key, last.onset, last.dur, cadence=ps.cadence)
-                if len(harmony) >= 2 and harmony[-2].function != "D":
-                    h2 = harmony[-2]
-                    harmony[-2] = Harmony("V7", ps.key, h2.onset, h2.dur)
         melody = []
         for m in src.melody:
             melody.append(MelNote(m.onset + shift, m.dur, m.midi + semis, None, m.role,
                                   list(m.marks)))
-        if ps.cadence in ("PAC", "plagal", "DC") and melody:
-            tonic_pc = ps.key.tonic_pc
-            last = melody[-1]
-            if last.midi % 12 != tonic_pc:
-                cands = [x for x in range(last.midi - 6, last.midi + 7) if x % 12 == tonic_pc]
-                last.midi = min(cands, key=lambda x: abs(x - last.midi))
-                # the note before steps into it
-                if len(melody) >= 2 and abs(melody[-2].midi - last.midi) > 4:
-                    before = melody[-2]
-                    h = harmony_at(harmony, before.onset)
-                    opts = [x for x in range(last.midi - 2, last.midi + 3)
-                            if x != last.midi and x % 12 in h.pcs]
-                    if opts:
-                        before.midi = min(opts, key=lambda x: abs(x - before.midi))
         prev_h = written[-1].harmony[-1] if written and written[-1].harmony else None
         for m in melody:
             h = prev_h if (m.onset < t and prev_h is not None) else harmony_at(harmony, m.onset)
@@ -561,6 +539,12 @@ class Composer:
             harmony, moved = change_mode(harmony, [m for m in melody if m.onset >= t], hkey,
                                          ps.key, self.beat)
             melody = upbeat + moved
+        if ps.cadence != src.spec.cadence and harmony:
+            self._close_return(harmony, melody, ps, t)
+            for m in melody:
+                if m.onset >= t:
+                    m.pitch = spell(m.midi, harmony_at(harmony, m.onset))
+            respell_line([m for m in melody if m.onset >= t], harmony, ps.key)
         if ps.variation in ("figural", "figural3"):
             melody = self._figural(melody, harmony, ps, t)
         if ps.variation == "tenor" and self.ensemble == "solo_piano":
@@ -586,6 +570,58 @@ class Composer:
                 ps.role in ("return", "climax", "variation"):
             harmony = self._recolour(harmony, body, ps)
         return Written(ps, t, harmony, melody, [], upbeat=src.upbeat)
+
+    def _close_return(self, harmony: list[Harmony], melody: list[MelNote], ps: PhraseSpec,
+                      t: F) -> None:
+        """A return that closes where the original only paused: the last
+        chord becomes the arrival, the chord before it a dominant that suits
+        the tune above it, and the tune's last note the tonic, stepped into."""
+        from .harmony import _melody_weights
+        if ps.cadence not in ("PAC", "plagal", "DC"):
+            return
+        minor = ps.key.is_minor
+        last = harmony[-1]
+        arrival = ("i" if minor else "I") if ps.cadence != "DC" else ("VI" if minor else "vi")
+        harmony[-1] = Harmony(arrival, ps.key, last.onset, last.dur, cadence=ps.cadence)
+        if len(harmony) >= 2 and harmony[-2].function != "D":
+            h2 = harmony[-2]
+            body = [m for m in melody if m.onset >= t]
+            weights = _melody_weights(body, h2, self.beat)
+            opts = (["iv", "iv6"] if minor else ["IV", "IV6"]) if ps.cadence == "plagal" \
+                else ["V7", "V", "V65", "V43", "viio7"]
+
+            def clash(label: str) -> float:
+                pcs = Harmony(label, ps.key, h2.onset, h2.dur).pcs
+                return sum(w for pc, w in weights if pc not in pcs)
+
+            best = min(opts, key=lambda r: (clash(r), opts.index(r)))
+            harmony[-2] = Harmony(best, ps.key, h2.onset, h2.dur)
+        body = [m for m in melody if m.onset >= t]
+        if not body:
+            return
+        # what the tune sang over the old last chord gives way to one closing
+        # note over the new one
+        arrival_at = harmony[-1].onset
+        over = [m for m in body if m.onset >= arrival_at]
+        if len(over) > 1:
+            keep = over[0]
+            keep.dur = over[-1].onset + over[-1].dur - keep.onset
+            for m in over[1:]:
+                melody.remove(m)
+            body = [m for m in melody if m.onset >= t]
+        tonic_pc = ps.key.tonic_pc
+        end = body[-1]
+        if end.midi % 12 != tonic_pc:
+            cands = [x for x in range(end.midi - 6, end.midi + 7) if x % 12 == tonic_pc]
+            end.midi = min(cands, key=lambda x: abs(x - end.midi))
+            # the note before steps into it
+            if len(body) >= 2 and abs(body[-2].midi - end.midi) > 4:
+                before = body[-2]
+                h = harmony_at(harmony, before.onset)
+                opts = [x for x in range(end.midi - 2, end.midi + 3)
+                        if x != end.midi and x % 12 in h.pcs]
+                if opts:
+                    before.midi = min(opts, key=lambda x: abs(x - before.midi))
 
     def _figural(self, melody: list[MelNote], harmony: list[Harmony], ps: PhraseSpec,
                  t: F) -> list[MelNote]:
@@ -661,7 +697,11 @@ class Composer:
             weights = _melody_weights(melody, h, self.beat)
             clash_old = sum(w for pc, w in weights if pc not in h.pcs)
             clash_new = sum(w for pc, w in weights if pc not in alt.pcs)
-            if clash_new <= clash_old:
+            # no accented note of the tune that fitted the chord may stop fitting it
+            lost = [n for n in melody if h.onset <= n.onset < h.end and
+                    (n.onset % self.bar) % self.beat == 0 and n.dur >= self.beat / 2 and
+                    n.midi % 12 in h.pcs and n.midi % 12 not in alt.pcs]
+            if clash_new <= clash_old and not lost:
                 out[i] = alt
         return out
 
