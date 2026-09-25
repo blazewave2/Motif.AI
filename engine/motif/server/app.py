@@ -420,9 +420,16 @@ def _writable_score(path: str) -> bool:
     return p.is_file() and p.suffix.lower() in (".musicxml", ".xml")
 
 
+# Accidentals spelled out, so "Nocturne in E♭ major" is not saved as E major.
+_SPELLED = (("𝄫", " double flat"), ("𝄪", " double sharp"), ("♭", " flat"), ("♯", " sharp"))
+
+
 def _safe_name(text: str) -> str:
-    keep = "".join(c if (c.isalnum() or c in " -_") else "" for c in text).strip()
-    return (keep or "Motif").replace(" ", "-")[:48]
+    for sign, word in _SPELLED:
+        text = text.replace(sign, word)
+    keep = "".join(c if (c.isalnum() or c in " -_") else " " for c in text)
+    name = "-".join(keep.split())[:48].strip("-_")
+    return name or "Motif"
 
 
 def _port_free(port: int, host: str = "127.0.0.1") -> bool:

@@ -342,7 +342,7 @@ class _Cursor:
     def __init__(self, voice: Voice):
         self.voice = voice
         self.notes = sorted(voice.notes, key=lambda n: n.onset)
-        self.marks = sorted(voice.marks, key=lambda m: m.onset)
+        self.marks = _one_dynamic_each(sorted(voice.marks, key=lambda m: m.onset))
         self.i = 0          # next note not yet fully written
         self.mi = 0
         self.carry: Note | None = None     # a note continuing from the previous bar
@@ -376,6 +376,19 @@ class _Cursor:
                 tokens.append(_mark_token(m))
                 self.mi += 1
 
+        def fill(until: F, inclusive: bool = True) -> None:
+            """Rests up to ``until``, with each marking written where it falls
+            among them: a phrase's dynamic belongs on its upbeat, not on the
+            rest before it."""
+            while self.mi < len(self.marks) and self.marks[self.mi].onset < until:
+                at = self.marks[self.mi].onset
+                if at > pos:
+                    gap(at)
+                emit_marks(at, inclusive=True)
+            gap(until)
+            if inclusive:
+                emit_marks(until, inclusive=True)
+
         # a note tied over from the last bar
         if self.carry is not None:
             n = self.carry
@@ -401,8 +414,7 @@ class _Cursor:
                     self.i += 1
                     continue
                 n = _clip(n, pos)
-            emit_marks(n.onset, inclusive=True)
-            gap(n.onset)
+            fill(n.onset)
             if n.tuplet is not None and n.tuplet_start:
                 group = [n]
                 j = self.i + 1
@@ -425,11 +437,13 @@ class _Cursor:
                 self.carry = n
                 self.carry_left = n.end - bar_end
                 break
-        emit_marks(bar_end, inclusive=False)
         if pos < bar_end:
-            if not wrote_note and not tokens:
+            pending = self.mi < len(self.marks) and self.marks[self.mi].onset < bar_end
+            if not wrote_note and not tokens and not pending:
                 return None if self.voice.secondary else "R"
-            gap(bar_end)
+            fill(bar_end, inclusive=False)
+        else:
+            emit_marks(bar_end, inclusive=False)
         if not wrote_note and all(t.startswith(("r:", "s:")) or t.startswith("!") or
                                   t.startswith('"') for t in tokens):
             if self.voice.secondary:
@@ -437,6 +451,19 @@ class _Cursor:
             marks = [t for t in tokens if not t.startswith(("r:", "s:"))]
             return " ".join(marks + ["R"]) if not pickup else " ".join(tokens)
         return " ".join(tokens)
+
+
+def _one_dynamic_each(marks: list[Mark]) -> list[Mark]:
+    """One dynamic at any moment: the first one set there stands."""
+    seen: set = set()
+    kept = []
+    for m in marks:
+        if m.kind == "dyn":
+            if m.onset in seen:
+                continue
+            seen.add(m.onset)
+        kept.append(m)
+    return kept
 
 
 def _pickup_shift(time: tuple[int, int], length: F) -> F:

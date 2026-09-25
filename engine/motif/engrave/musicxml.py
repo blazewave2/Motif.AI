@@ -343,7 +343,7 @@ class MusicXMLWriter:
         if not getattr(t, "visible", True):
             # Playback only: MuseScore turns a bare <sound tempo> into an
             # invisible tempo change, which is how rit. and accel. are heard.
-            self._leaf("sound", None, f'tempo="{playback:.2f}"')
+            self._leaf("sound", None, f'tempo="{_sound_bpm(playback)}"')
             return
         self._open("direction", 'placement="above"')
         if t.text:
@@ -363,7 +363,7 @@ class MusicXMLWriter:
         self._close("direction-type")
         if part.staves > 1:
             self._leaf("staff", 1)
-        self._leaf("sound", None, f'tempo="{playback:.2f}"')
+        self._leaf("sound", None, f'tempo="{_sound_bpm(playback)}"')
         self._close("direction")
 
     def _direction(self, d: Direction, part: Part | None = None) -> None:
@@ -598,6 +598,12 @@ def _direction_order(d: Direction) -> int:
 
 def _bpm_text(bpm: float) -> str:
     return str(int(round(bpm))) if abs(bpm - round(bpm)) < 0.05 else f"{bpm:.1f}"
+
+
+def _sound_bpm(bpm: float) -> str:
+    """A playback tempo as MuseScore will show it (greyed) on a hidden tempo
+    change: 59, not 59.00."""
+    return f"{round(bpm, 2):g}"
 
 
 def _tuplet_display(duration: int, t) -> int:
