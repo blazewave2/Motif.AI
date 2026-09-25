@@ -42,20 +42,44 @@ textures used for each kind of passage (theme, middle section, climax,
 return, coda), pedalling, dynamic range, rubato, ornamentation, whether the
 climax doubles the tune in octaves, how often the accompaniment starts alone,
 the language of its tempo words and the character it leans to. Twenty-five
-composers have their own profile; any other composer maps to the nearest one
-(Medtner to Rachmaninoff, Fauré to the Romantic profile, Field to Chopin).
+composers have their own profile. Any other composer a request names writes
+through their nearest kin — Medtner, Prokofiev and Shostakovich through
+Rachmaninoff, Fauré and Franck through the Romantic profile, Field through
+Chopin, Dvořák and Elgar through Brahms, Philip Glass and Max Richter through
+Einaudi, Hisaishi and John Williams through the film idiom, some hundred
+names in all — and the reply calls the piece by the composer asked for.
+Names that are also ordinary words (Field, Glass, Pärt) count only when the
+request says them as names.
 
 ## Form (`form.py`)
 
-A genre is laid out as phrases of four and eight bars. A prelude, nocturne,
+A genre is laid out as phrases of four and eight bars. A named kind of
+piece keeps its own metre, tempo and bearing: a gigue, barcarolle, berceuse
+or siciliano in compound time; a sarabande, polonaise or scherzo in three; a
+march or gavotte in duple time; the polonaise with its rhythm in the left
+hand, the march with its bass and dotted fanfares, a toccata running without
+a break. A prelude, nocturne,
 romance or élégie is ternary: a theme group (a period or sentence pair), a
 middle section in a related key with its own theme and more motion, a short
 passage leading home, the theme returning — at its climax in octaves over
 tolling bells for Rachmaninoff and Liszt, ornamented for Chopin — and a coda
 that remembers the opening. Waltzes and mazurkas are chains of sixteen-bar
 strains; sonatas have two key areas, a development and a recapitulation;
-minuets have a trio; inventions state their subject and answer it. The genre
-and metre come from the request when it names them.
+minuets and marches have a trio; inventions state their subject and answer
+it; a rondo's refrain comes home between two episodes, each with a theme of
+its own (A B A C A and a coda). The genre and metre come from the request
+when it names them.
+
+## Part of a piece
+
+A request can ask for only part of a piece, and gets exactly that, at the
+length it asks for: a **motif** (its idea stated and answered), a
+**phrase**, a **theme** or **melody** (a period that pauses on the dominant
+and closes at home), an **introduction** that comes to rest on the
+dominant, a **cadenza** that sweeps in runs over held harmony to a trill
+under a fermata, or a **chord progression** — voice-led chords with their
+names printed above. "No accompaniment" leaves the left hand empty, ready
+for *Add a left hand accompaniment*.
 
 ## Themes (`melody.py`)
 

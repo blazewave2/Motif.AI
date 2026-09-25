@@ -46,6 +46,8 @@ Anything you would ask a composer sitting next to you:
 - *"Write a short film score for a mysterious forest scene"*
 - *"A Bach fugue in D minor at 92 bpm"*
 - *"Six variations on a theme in the style of Mozart"*
+- *"An 8-bar theme in the style of Schubert, no accompaniment"* — or a motif,
+  an introduction, a cadenza, a chord progression: just the part you need
 - *"Make it darker and slower"* — writes the same piece again in that mood
 - *"Continue this piece in a more dramatic way"* — it reads your open score
 - *"Continue in the same style"* — matches the composer, key, tempo and
@@ -92,7 +94,9 @@ note ([how it works](docs/COMPOSER.md)):
 Vivaldi, Mozart, Haydn, Clementi, Beethoven, Schubert, Mendelssohn, Chopin,
 Schumann, Liszt, Brahms, Grieg, Tchaikovsky, Rachmaninoff, Scriabin, Debussy,
 Ravel, Satie, Einaudi and film idioms — and any other composer by kinship
-(Medtner writes like Rachmaninoff, Field like Chopin).
+(Medtner writes like Rachmaninoff, Field like Chopin, Fauré like the
+Romantics, Hisaishi like film), with the piece credited to the composer you
+named.
 
 **Any ensemble** — solo piano; voice, violin or cello with piano; piano trio;
 string quartet; string orchestra; orchestra; organ; harpsichord; guitar.
