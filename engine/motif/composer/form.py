@@ -118,7 +118,7 @@ def genre_family(genre: str) -> str:
 #: Names of pieces a request may ask for, most specific first.
 GENRE_WORDS = (
     "etude-tableau", "étude-tableau", "etude tableau", "song without words", "moment musical",
-    "concerto", "theme and variations", "variations", "variation",
+    "concerto", "theme and variations", "variations", "variation", "rondo", "rondeau",
     "lyric piece", "gymnopédie", "gymnopedie", "gnossienne", "liebestraum", "consolation",
     "nocturne", "prelude", "prélude", "waltz", "valse", "mazurka", "polonaise", "sonatina",
     "sonata", "minuet", "menuet", "gavotte", "sarabande", "gigue", "invention", "fugue",
@@ -145,6 +145,7 @@ _METRES = {
     "etude": [((4, 4), 6), ((2, 4), 2), ((6, 8), 1)],
     "sonata": [((4, 4), 6), ((3, 4), 2), ((2, 4), 1)],
     "invention": [((4, 4), 6), ((3, 4), 2)],
+    "rondo": [((2, 4), 4), ((6, 8), 3), ((4, 4), 3)],
 }
 
 
@@ -163,6 +164,7 @@ def _genre_family(genre: str) -> str:
         ("continuation", ("continuation",)),
         ("concerto", ("concerto",)),
         ("variations", ("variation",)),
+        ("rondo", ("rondo", "rondeau")),
         ("waltz", ("waltz", "valse", "ländler")),
         ("mazurka", ("mazurka", "polonaise")),
         ("sonata", ("sonata", "sonatina", "first movement")),
@@ -493,6 +495,49 @@ def _concerto(prof: Profile, key: Key, bars: int, rng: random.Random, character:
     return FormPlan("concerto", ph)
 
 
+def _rondo(prof: Profile, key: Key, bars: int, rng: random.Random, character: str, **_
+           ) -> FormPlan:
+    """A refrain that keeps coming home between episodes — A B A C A and a
+    coda. The refrain is a period in the home key; the first episode moves
+    to the dominant (the relative major in minor) with a theme of its own,
+    the second somewhere darker with another; each episode leads back over
+    a dominant pedal, and the refrain's last return is its fullest."""
+    tx: dict = {}
+    minor = key.is_minor
+    big = bars >= 72
+    words = prof.words
+    b_key = _related(key, "relative" if minor else "dominant")
+    c_key = _related(key, "subdominant" if minor else rng.choice(["relative", "parallel"]))
+    ph: list[PhraseSpec] = []
+    ph += _theme_group("A", "theme", key, 16 if big else 8, prof, rng, tx, 0.55,
+                       words=words.get("theme", ""), short=not big)
+    refrain = list(range(len(ph)))
+    ctex = _tex(prof, "contrast", rng, tx)
+    for section, ekey, energy in (("B", b_key, 0.6), ("C", c_key, 0.7)):
+        ph.append(_phr(section, "contrast", "sentence", 8, ekey, "PAC", energy, ctex,
+                       new_section=True, words=words.get("contrast", "") if section == "C"
+                       else ""))
+        if big:
+            ph.append(_phr(section, "contrast", "continuation", 8, ekey, "PAC", energy + 0.05,
+                           ctex))
+        ph.append(_phr(section, "transition", "development", 4, key, "HC", energy + 0.15,
+                       ctex))
+        last_return = section == "C"
+        for j, src in enumerate(refrain):
+            p = ph[src]
+            variation = ("octaves" if prof.octave_climax else "ornament") if last_return \
+                else ("ornament" if prof.ornaments >= 0.2 else "")
+            ph.append(_phr("A'" if not last_return else "A''",
+                           "climax" if last_return and prof.octave_climax else "return",
+                           p.kind, p.bars, key, p.cadence, 0.8 if last_return else 0.55,
+                           _tex(prof, "climax" if last_return and prof.octave_climax
+                                else "return", rng, tx),
+                           recall=src, variation=variation, new_section=(j == 0)))
+    ph.append(_phr("coda", "closing", "closing", 8 if big else 4, key, "PAC", 0.75,
+                   _tex(prof, "closing", rng, tx), new_section=True))
+    return FormPlan("rondo", ph)
+
+
 #: The kinds of variation each idiom reaches for, in the order a set uses
 #: them: the first is always a figuration, the last the finale.
 _PROGRAMMES = {
@@ -637,5 +682,5 @@ _TEMPLATES = {
     "concerto": _concerto,
     "prelude": _ternary, "nocturne": _ternary, "waltz": _waltz, "mazurka": _mazurka,
     "sonata": _sonata, "minuet": _minuet, "invention": _invention, "etude": _etude,
-    "variations": _variations,
+    "variations": _variations, "rondo": _rondo,
 }

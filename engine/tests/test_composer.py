@@ -367,3 +367,14 @@ def test_variations_are_recognised_and_concertos_only_when_asked():
         plan = parse_prompt("A Rachmaninoff piece", seed=seed)
         assert plan.form != "concerto" and plan.ensemble == "solo_piano"
     assert parse_prompt("A Rachmaninoff concerto", seed=1).ensemble == "piano_concerto"
+
+
+def test_a_rondo_returns_to_its_refrain_between_two_episodes():
+    c, _ = _compose("A Mozart rondo in D major", seed=1)
+    assert _errors(c.msn) == []
+    assert c.family == "rondo"
+    names = [s["name"] for s in c.summary["sections"]]
+    assert names == ["A", "B", "A'", "C", "A''", "coda"]
+    keys = {s["name"]: s["key"] for s in c.summary["sections"]}
+    assert keys["A"] == keys["A'"] == keys["A''"] == "D major"
+    assert keys["B"] != keys["A"] and keys["C"] not in (keys["A"], keys["B"])

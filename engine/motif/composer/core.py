@@ -187,6 +187,11 @@ class Composer:
             "A": MelodyWriter(mstyle, motif, self.rng, beam=self.care.beam, time=self.time),
             "B": MelodyWriter(mstyle, contrast, self.rng, beam=self.care.beam, time=self.time),
         }
+        if any(p.role == "contrast" and p.section == "C" for p in form.phrases):
+            # a rondo's second episode has a theme of its own
+            third = invent_contrast(mstyle, motif, self.time, self.rng, self.care.motifs)
+            writers["C"] = MelodyWriter(mstyle, third, self.rng, beam=self.care.beam,
+                                        time=self.time)
         if self.theme is not None:
             writers["A"].theme_bars = [list(b) for b in self.theme.bars]
             writers["A"].theme_key = self.theme.key
@@ -208,7 +213,7 @@ class Composer:
             nxt = form.phrases[i + 1] if i + 1 < n else None
             tail = self._upbeat_of(nxt, written, writers) if nxt is not None else F(0)
             upbeat = self._upbeat_of(ps, written, writers) if written else F(0)
-            writer = writers["B"] if ps.role == "contrast" else writers["A"]
+            writer = _writer_for(ps, writers)
             if ps.recall is not None and ps.recall < len(written):
                 w = self._recall(written[ps.recall], ps, t, written)
             elif ps.kind == "intro":
@@ -316,7 +321,7 @@ class Composer:
             # a tune in the left hand starts on its downbeat: the hand is
             # still busy with the phrase before
             return F(0)
-        writer = writers["B"] if ps.role == "contrast" else writers["A"]
+        writer = _writer_for(ps, writers)
         roles = roles_for(ps.kind, ps.bars)
         if roles and roles[0] in ("idea", "recall:0") and writer.motif.anacrusis:
             return sum(writer.motif.anacrusis, F(0))
@@ -782,6 +787,9 @@ class Composer:
         dyn = _energy_dynamic(prof, ps.energy)
         if ps.role == "closing" and ps.section == "coda":
             dyn = prof.dynamics[0]
+        elif ps.role == "transition":
+            # a passage leading home starts below where it is going and grows
+            dyn = _energy_dynamic(prof, max(0.3, ps.energy - 0.3))
         if first or ps.new_section or dyn != self._last_dyn:
             (rh if w.melody else lh).marks.append(Mark(at, "dyn", dyn))
             self._last_dyn = dyn
@@ -932,6 +940,14 @@ def _virtuoso(prof: Profile) -> bool:
 
 def prof_pedal(prof: Profile) -> bool:
     return prof.harmony in ("russian", "romantic", "impressionist")
+
+
+def _writer_for(ps: PhraseSpec, writers: dict) -> MelodyWriter:
+    """Whose theme a phrase is written from: the main theme's, the
+    contrasting theme's — or, in a rondo's second episode, a third."""
+    if ps.role == "contrast":
+        return writers["C"] if ps.section == "C" and "C" in writers else writers["B"]
+    return writers["A"]
 
 
 _COUNTS = {"two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,

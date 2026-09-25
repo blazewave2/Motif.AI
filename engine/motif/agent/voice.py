@@ -174,7 +174,10 @@ def composed_message(plan: CompositionPlan, summary: dict,
     shape = th.get("shape", 0)
     shape_word = "rising" if shape > 0 else "falling" if shape < 0 else "arching"
     described: set[str] = set()
-    for sec in secs:
+    rondo = summary.get("family") == "rondo"
+    episodes = 0
+    returns = [i for i, sec in enumerate(secs) if sec["role"] in ("return", "climax")]
+    for si, sec in enumerate(secs):
         role, a, b = sec["role"], sec["start"], sec["end"]
         if sec["texture"] in described:
             tex = rng.choice(["the same accompaniment", "the accompaniment heard before"])
@@ -200,6 +203,26 @@ def composed_message(plan: CompositionPlan, summary: dict,
         elif role == "climax" and forces == "tutti":
             story.append(f"The theme returns at the climax ({_bars(a, b)}) with the full "
                          f"orchestra and the piano's massive chords together.")
+        elif rondo and role == "theme":
+            story.append(f"The refrain ({_bars(a, b)}) is a {shape_word} tune that closes "
+                         f"at home, over {tex}.")
+        elif rondo and role == "contrast":
+            episodes += 1
+            if episodes == 1:
+                story.append(f"The first episode ({_bars(a, b)}) moves to {sec['key']} with "
+                             f"a theme of its own over {tex}, and finds its way back over "
+                             f"the dominant.")
+            else:
+                story.append(f"The second episode ({_bars(a, b)}) turns to {sec['key']} "
+                             f"with yet another theme, over {tex}.")
+        elif rondo and role in ("return", "climax"):
+            last = returns and si == returns[-1]
+            how = {"ornament": ", ornamented", "octaves": " in octaves"}.get(
+                sec.get("variation", ""), "")
+            story.append(f"At last the refrain returns{how} ({_bars(a, b)}), at its fullest."
+                         if last else f"The refrain returns{how} ({_bars(a, b)}).")
+        elif rondo and role == "transition":
+            continue
         elif role == "intro":
             story.append(f"It opens with {_bars(a, b)} of accompaniment alone — {tex}.")
         elif role == "theme":
@@ -232,6 +255,8 @@ def composed_message(plan: CompositionPlan, summary: dict,
             story.append(f"The theme comes back{how} in {_bars(a, b)}.")
         elif role == "closing" and forces == "tutti":
             story.append(f"A coda for everyone ({_bars(a, b)}) brings it home in full voice.")
+        elif role == "closing" and sec.get("energy", 0.3) >= 0.6:
+            story.append(f"A coda ({_bars(a, b)}) brings it to a brilliant close.")
         elif role == "closing":
             story.append(f"A coda ({_bars(a, b)}) remembers the opening and settles.")
     # merge duplicate sentences for repeated sections
