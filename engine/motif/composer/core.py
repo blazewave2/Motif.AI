@@ -176,7 +176,8 @@ class Composer:
     def _compose(self) -> Score:
         plan, prof = self.plan, self.prof
         self._say("planning", "Planning the form", "", 0.02)
-        target = getattr(plan, "length_bars", 0) or plan.total_bars or 48
+        target = getattr(plan, "length_bars", 0) or getattr(plan, "size_bars", 0) or \
+            plan.total_bars or 48
         options: dict = {}
         if self.scope:
             given = getattr(plan, "length_bars", 0)
@@ -192,6 +193,8 @@ class Composer:
             options = {"count": count or (4 if large else 5), "long_theme": large}
         form = plan_form(self.genre, prof, self.key, target, self.rng, plan.character,
                          **options)
+        if getattr(plan, "length_bars", 0) and not self.scope and self.family != "variations":
+            _fit_length(form, plan.length_bars)
         self._fit_section_tempi(form)
         if self.simple:
             form = _simplify(form, prof)
@@ -1138,6 +1141,45 @@ def _by_bar(notes: list[MelNote], start: F, bar: F, bars: int) -> list[list[MelN
     return out
 
 
+def _fit_length(form: FormPlan, target: int) -> None:
+    """A piece asked for at a length is written at that length: an
+    introduction gives way and the coda shortens when the plan runs long,
+    and the coda grows when it runs short."""
+    def total() -> int:
+        return sum(p.bars for p in form.phrases)
+
+    for i in [i for i, p in enumerate(form.phrases) if p.kind == "intro"][::-1]:
+        if total() <= target:
+            break
+        _drop_phrase(form, i)
+    codas = [p for p in form.phrases if p.role == "closing"]
+    for p in codas[::-1]:
+        while p.bars > 2 and total() > target:
+            p.bars -= 2 if p.bars > 4 or total() - target >= 2 else 1
+    if total() > target and len(form.phrases) > 2 and form.phrases[-1].role == "closing" and \
+            total() - form.phrases[-1].bars >= target - 1:
+        # a short piece can end with its return, closing on the tonic
+        _drop_phrase(form, len(form.phrases) - 1)
+        if form.phrases[-1].cadence not in ("PAC", "plagal"):
+            form.phrases[-1].cadence = "PAC"
+    if total() > target:
+        for i in [i for i, p in enumerate(form.phrases) if p.role == "transition"][::-1]:
+            if total() - form.phrases[i].bars >= target - 2:
+                _drop_phrase(form, i)
+            if total() <= target:
+                break
+    if total() < target and codas:
+        coda = codas[-1]
+        coda.bars += min(target - total(), max(0, 12 - coda.bars))
+
+
+def _drop_phrase(form: FormPlan, i: int) -> None:
+    del form.phrases[i]
+    for p in form.phrases:
+        if p.recall is not None:
+            p.recall = None if p.recall == i else (p.recall - 1 if p.recall > i else p.recall)
+
+
 _EASY_TEXTURES = {"alberti": "alberti", "waltz": "waltz", "block": "block",
                   "sustained": "sustained", "walking": "block"}
 
@@ -1378,7 +1420,11 @@ def _inner_line(w: Written, beat: F, stop: F) -> list[Note]:
         if nxt is not None and m % 12 not in nxt.pcs and dur >= 2 * beat and nxt.end - nxt.onset >= 2 * beat:
             res = [x for x in (m - 1, m - 2) if x % 12 in nxt.pcs]
             nxt_over = [n.midi for n in mel if n.onset < nxt.onset + beat and n.end > nxt.onset]
-            if res and nxt_over and max(nxt_over) - res[0] <= 10 and min(nxt_over) - m >= 3:
+            res_over = [n.midi for n in mel if n.onset < min(nxt.end, stop) and
+                        n.end > nxt.onset + beat]
+            if res and nxt_over and max(nxt_over) - m <= 10 and min(nxt_over) - m >= 3 and \
+                    (not res_over or (max(res_over) - res[0] <= 10 and
+                                      min(res_over) - res[0] >= 3)):
                 out.append(Note(h.onset, dur, [spell(m, h)], tie=True))
                 out.append(Note(nxt.onset, beat, [spell(m, h)]))
                 out.append(Note(nxt.onset + beat, nxt.end - nxt.onset - beat,

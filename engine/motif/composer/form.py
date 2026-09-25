@@ -393,6 +393,10 @@ def _theme_group(section: str, role: str, key: Key, bars: int, prof: Profile,
                  short: bool = False) -> list[PhraseSpec]:
     out: list[PhraseSpec] = []
     tex = _tex(prof, role, rng, tx)
+    if short and bars <= 4:
+        # the smallest theme: one phrase that closes
+        return [_phr(section, role, "antecedent", 4, key, "PAC", energy, tex, new_section=True,
+                     words=words)]
     if short and bars <= 8:
         # a small period: four bars that ask, four that answer
         return [_phr(section, role, "antecedent", 4, key, "HC", energy, tex, new_section=True,
@@ -434,19 +438,34 @@ def _phrase_bars(x: float) -> int:
 
 def _waltz(prof: Profile, key: Key, bars: int, rng: random.Random, character: str, **_
            ) -> FormPlan:
+    """A chain of strains: the waltz tune, a second strain in another key,
+    the tune again — and in a longer waltz a third strain with a tune of its
+    own and the waltz tune once more — and a coda. A strain is sixteen bars,
+    or eight in a short waltz."""
     tx: dict = {"theme": "waltz", "contrast": "waltz", "return": "waltz", "closing": "waltz"}
     b_key = _related(key, "relative" if key.is_minor else rng.choice(["dominant",
                                                                       "subdominant"]))
-    phrases = []
-    phrases += _theme_group("A", "theme", key, 16, prof, rng, tx, 0.5, prof.words.get("theme", ""))
-    phrases += _theme_group("B", "contrast", b_key, 16, prof, rng, tx, 0.65)
-    for p in list(phrases[:2]):
-        phrases.append(_phr("A'", "return", p.kind, p.bars, key, p.cadence, 0.55, "waltz",
-                            recall=phrases.index(p), variation="ornament",
-                            new_section=(p is phrases[0])))
-    phrases.append(_phr("coda", "closing", "closing", 8 if bars >= 48 else 4, key, "PAC", 0.6,
-                        "waltz", new_section=True))
-    return FormPlan("waltz", phrases)
+    strain = 8 if bars < 44 else 16
+    ph: list[PhraseSpec] = []
+    ph += _theme_group("A", "theme", key, strain, prof, rng, tx, 0.5,
+                       prof.words.get("theme", ""), short=strain <= 8)
+    refrain = list(range(len(ph)))
+    ph += _theme_group("B", "contrast", b_key, strain, prof, rng, tx, 0.65, short=strain <= 8)
+
+    def again(name: str, energy: float, variation: str) -> None:
+        for j, src in enumerate(refrain):
+            p = ph[src]
+            ph.append(_phr(name, "return", p.kind, p.bars, key, p.cadence, energy, "waltz",
+                           recall=src, variation=variation, new_section=(j == 0)))
+
+    again("A'", 0.55, "ornament")
+    if bars >= 72:
+        c_key = _related(key, "subdominant" if not key.is_minor else "parallel")
+        ph += _theme_group("C", "contrast", c_key, strain, prof, rng, tx, 0.6)
+        again("A''", 0.65, "ornament")
+    ph.append(_phr("coda", "closing", "closing", 8 if bars >= 48 else 4, key, "PAC", 0.6,
+                   "waltz", new_section=True))
+    return FormPlan("waltz", ph)
 
 
 def _mazurka(prof: Profile, key: Key, bars: int, rng: random.Random, character: str, **_
@@ -458,28 +477,54 @@ def _mazurka(prof: Profile, key: Key, bars: int, rng: random.Random, character: 
 
 def _sonata(prof: Profile, key: Key, bars: int, rng: random.Random, character: str, **_
             ) -> FormPlan:
-    """An exposition with two key areas, a development and a recapitulation."""
+    """An exposition with two key areas, a development and a recapitulation,
+    sized to the piece: a sonatina's small periods and short development, a
+    movement's eight-bar themes, or a large movement's sixteen-bar theme
+    groups and a development that travels through several keys."""
     tx: dict = {}
     s_key = _related(key, "dominant" if not key.is_minor else "relative")
+    if bars < 48:
+        group, tr, k, dev, rt, coda = 8, 0, 0, 4, 0, 4
+    elif bars < 90:
+        group, tr, k, dev, rt, coda = 8, 4, 4, 8, 4, 4
+    elif bars < 140:
+        group, tr, k, dev, rt, coda = 16, 8, 8, 16, 8, 8
+    else:
+        group, tr, k, dev, rt, coda = 16, 8, 8, 32, 8, 8
     ph: list[PhraseSpec] = []
-    ph += _theme_group("P", "theme", key, 8, prof, rng, tx, 0.55)
-    ph.append(_phr("TR", "transition", "development", 4, key, "HC", 0.7,
-                   _tex(prof, "contrast", rng, tx)))
-    ph[-1].key = s_key
+    ph += _theme_group("P", "theme", key, group, prof, rng, tx, 0.55, short=group <= 8 and
+                       bars < 48)
+    p_idx = list(range(len(ph)))
+    if tr:
+        ph.append(_phr("TR", "transition", "development", tr, s_key, "HC", 0.7,
+                       _tex(prof, "contrast", rng, tx)))
     s_start = len(ph)
-    ph += _theme_group("S", "contrast", s_key, 8, prof, rng, tx, 0.5)
-    ph.append(_phr("K", "closing", "closing", 4, s_key, "PAC", 0.65,
-                   _tex(prof, "closing", rng, tx)))
-    dev_key = _related(key, "relative" if not key.is_minor else "subdominant")
-    ph.append(_phr("Dev", "development", "development", 8, dev_key, "HC", 0.85,
-                   _tex(prof, "contrast", rng, tx), new_section=True))
-    ph.append(_phr("Dev", "transition", "development", 4, key, "HC", 0.9,
-                   _tex(prof, "contrast", rng, tx)))
-    ph.append(_phr("P'", "return", ph[0].kind, ph[0].bars, key, "PAC", 0.55, ph[0].texture,
-                   recall=0, new_section=True))
-    ph.append(_phr("S'", "return", ph[s_start].kind, ph[s_start].bars, key, "PAC", 0.55,
-                   ph[s_start].texture, recall=s_start, variation="transpose"))
-    ph.append(_phr("coda", "closing", "closing", 4, key, "PAC", 0.6,
+    ph += _theme_group("S", "contrast", s_key, group, prof, rng, tx, 0.5, short=group <= 8 and
+                       bars < 48)
+    s_idx = list(range(s_start, len(ph)))
+    if k:
+        ph.append(_phr("K", "closing", "closing", k, s_key, "PAC", 0.65,
+                       _tex(prof, "closing", rng, tx)))
+    dev_keys = [_related(key, "relative" if not key.is_minor else "subdominant"),
+                _related(key, "subdominant" if not key.is_minor else "submediant"),
+                _related(key, "submediant" if not key.is_minor else "relative"),
+                _related(key, "parallel")]
+    for i in range(max(1, dev // 8)):
+        ph.append(_phr("Dev", "development", "development", min(8, dev), dev_keys[i % 4],
+                       "HC", 0.8 + 0.05 * min(i, 2), _tex(prof, "contrast", rng, tx),
+                       new_section=(i == 0)))
+    if rt:
+        ph.append(_phr("Dev", "transition", "development", rt, key, "HC", 0.9,
+                       _tex(prof, "contrast", rng, tx)))
+    for j, src in enumerate(p_idx):
+        p = ph[src]
+        ph.append(_phr("P'", "return", p.kind, p.bars, key, "PAC" if j == len(p_idx) - 1
+                       else p.cadence, 0.55, p.texture, recall=src, new_section=(j == 0)))
+    for j, src in enumerate(s_idx):
+        p = ph[src]
+        ph.append(_phr("S'", "return", p.kind, p.bars, key, "PAC" if j == len(s_idx) - 1
+                       else p.cadence, 0.55, p.texture, recall=src, variation="transpose"))
+    ph.append(_phr("coda", "closing", "closing", coda, key, "PAC", 0.6,
                    _tex(prof, "closing", rng, tx), new_section=True))
     return FormPlan("sonata", ph)
 
@@ -510,17 +555,23 @@ def _minuet(prof: Profile, key: Key, bars: int, rng: random.Random, character: s
 
 def _invention(prof: Profile, key: Key, bars: int, rng: random.Random, character: str, **_
                ) -> FormPlan:
+    """The subject alone, answered in the other hand; episodes that carry it
+    through related keys — more of them in a longer piece — and the subject
+    home again."""
     tx: dict = {}
     tex = _tex(prof, "theme", rng, tx)
     other = _related(key, "dominant" if not key.is_minor else "relative")
-    # the subject alone, then answered in the other hand an octave lower
     lead = "imitation" if tex == "walking" else tex
-    ph = [
-        _phr("A", "theme", "sentence", 8, key, "HC", 0.5, lead, new_section=True),
-        _phr("A", "development", "continuation", 8, other, "PAC", 0.6, tex),
-        _phr("B", "development", "development", 8, _related(key, "submediant"), "PAC", 0.7, tex),
-        _phr("A'", "return", "sentence", 8, key, "PAC", 0.6, lead, recall=0),
-    ]
+    keys = [other, _related(key, "submediant"), _related(key, "subdominant"),
+            _related(key, "relative" if not key.is_minor else "dominant")]
+    episodes = max(2, min(8, round((bars - 16) / 8)))
+    ph = [_phr("A", "theme", "sentence", 8, key, "HC", 0.5, lead, new_section=True),
+          _phr("A", "development", "continuation", 8, other, "PAC", 0.6, tex)]
+    for i in range(episodes - 1):
+        ph.append(_phr("B", "development", "development", 8, keys[(i + 1) % len(keys)], "PAC",
+                       0.65 + 0.05 * min(i, 3), tex, new_section=(i == 0)))
+    ph.append(_phr("A'", "return", "sentence", 8, key, "PAC", 0.6, lead, recall=0,
+                   new_section=True))
     return FormPlan("invention", ph)
 
 

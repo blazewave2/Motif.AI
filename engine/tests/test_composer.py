@@ -432,3 +432,14 @@ def test_a_progression_prints_its_chord_names_and_a_melody_can_stand_alone():
           if n.staff == 2 and n.pitches]
     assert lh == []
     assert score.metadata.get("style") == "schubert"
+
+
+@pytest.mark.parametrize("prompt,bars", [
+    ("A 16 bar Chopin nocturne", 16), ("A 12 bar Chopin prelude", 12),
+    ("A Chopin nocturne, 64 bars", 64), ("A 100 bar Mozart sonata", 100),
+    ("A 40 bar Clementi sonatina", 40),
+])
+def test_a_piece_asked_for_at_a_length_is_written_at_that_length(prompt, bars):
+    c, score = _compose(prompt, seed=2)
+    assert _errors(c.msn) == []
+    assert score.measure_count == bars

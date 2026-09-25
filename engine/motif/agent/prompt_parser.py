@@ -310,6 +310,12 @@ def parse_prompt(prompt: str, *, seed: int | None = None,
         for words, n in SCOPE_WORDS:
             if any(w in text for w in words):
                 bars = n
+        # a size asked for outright outweighs the size a kind of piece
+        # usually has: a short prelude is short
+        if re.search(r"\b(short|brief|little|small|tiny|miniature)\b", text):
+            bars = min(bars, 24)
+        elif re.search(r"\b(long|extended|substantial|big|large)\b", text):
+            bars = max(bars, 80)
         if simple:
             bars = min(bars, 16)
     if ensemble == "piano_concerto" and not mb:
@@ -372,6 +378,7 @@ def parse_prompt(prompt: str, *, seed: int | None = None,
         subtitle=_subtitle(ensemble, style),
         style=style.name, key=str(key), time=time, tempo=bpm, tempo_text=tempo_text,
         tempo_given=tempo_given, time_given=time_given, length_bars=length_bars,
+        size_bars=bars,
         form=form, sections=sections, instruments=instruments,
         seed=rng.randint(1, 2 ** 30), prompt=prompt, character=character,
         ensemble=ensemble)

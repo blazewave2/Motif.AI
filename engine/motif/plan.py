@@ -60,6 +60,7 @@ class CompositionPlan:
     tempo_given: bool = False            # the request named a tempo
     time_given: bool = False             # the request named a metre
     length_bars: int = 0                 # the length the request asked for, if it did
+    size_bars: int = 0                   # the size the request implies (short, long, …)
     form: str = "ternary"
     sections: list[SectionPlan] = field(default_factory=list)
     instruments: list[InstrumentPlan] = field(default_factory=list)
