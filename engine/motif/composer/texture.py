@@ -243,6 +243,22 @@ def waltz(h: Harmony, t0: F, dur: F, ctx: TextureContext) -> list[TexNote]:
     return out
 
 
+def chorale(h: Harmony, t0: F, dur: F, ctx: TextureContext) -> list[TexNote]:
+    """The chords alone, as a progression is played: the bass in the left
+    hand (in octaves when the music is strong), the chord in close position
+    in the right, each voice moving as little as it can."""
+    b = bass_note(h, ctx)
+    ctx.prev_bass = b
+    lh = [b - 12, b] if ctx.energy > 0.7 and b - 12 >= 28 else [b]
+    v = voicing(h, ctx, 4 if len(h.pcs) >= 4 else 3, 58, 77, ctx.prev_voicing, max_span=12,
+                include_bass_pc=True)
+    ctx.prev_voicing = v or ctx.prev_voicing
+    out = [TexNote(t0, dur, lh)]
+    if v:
+        out.append(TexNote(t0, dur, v, staff="RH", voice=1))
+    return out
+
+
 def march(h: Harmony, t0: F, dur: F, ctx: TextureContext) -> list[TexNote]:
     """The march bass: the bass on the strong beats (root, then the fifth
     below), the chord on the weak ones, short and firm."""
@@ -515,9 +531,12 @@ def tenor(h: Harmony, t0: F, dur: F, ctx: TextureContext) -> list[TexNote]:
         t += unit
     b = bass_note(h, ctx)
     ctx.prev_bass = b
-    low = _melody_low(ctx, t0, t0 + min(dur, ctx.beat))
-    if low is not None and 5 <= low - b <= 12:
-        out.append(TexNote(t0, min(dur, ctx.beat * 2), [b], staff="LH", voice=2))
+    hold = min(dur, ctx.beat * 2)
+    # the bass is held under whatever the tune plays meanwhile: every note of
+    # it must be within the left hand's reach of the bass
+    under = [n.midi for n in ctx.melody if n.onset < t0 + hold and n.onset + n.dur > t0]
+    if under and all(5 <= m - b <= 14 for m in under):
+        out.append(TexNote(t0, hold, [b], staff="LH", voice=2))
     return out
 
 
@@ -543,7 +562,7 @@ REALISERS = {
     "bells": bells, "sweep": lambda h, t, d, c: sweep(h, t, d, c, True),
     "sweep16": lambda h, t, d, c: sweep(h, t, d, c, False), "repeated": repeated,
     "sustained": sustained, "final": final_chord, "tenor": tenor, "march": march,
-    "polonaise": polonaise,
+    "polonaise": polonaise, "chorale": chorale, "none": lambda h, t, d, c: [],
 }
 
 

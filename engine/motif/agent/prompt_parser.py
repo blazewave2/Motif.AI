@@ -25,7 +25,15 @@ _NOTE_RE = re.compile(
     re.I)
 _METER_RE = re.compile(r"\b(\d{1,2})\s*/\s*(\d{1,2})\b")
 _BPM_RE = re.compile(r"\b(\d{2,3})\s*(?:bpm|beats per minute)\b", re.I)
-_BARS_RE = re.compile(r"\b(\d{1,3})\s*(?:bars?|measures?)\b", re.I)
+_NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
+                 "eight": 8, "nine": 9, "ten": 10, "twelve": 12, "sixteen": 16, "twenty": 20,
+                 "twenty-four": 24, "thirty-two": 32, "forty": 40, "sixty-four": 64}
+_BARS_RE = re.compile(r"\b(\d{1,3}|" + "|".join(sorted(_NUMBER_WORDS, key=len, reverse=True))
+                      + r")\s*-?\s*(?:bars?|measures?)\b", re.I)
+
+
+def _count(word: str) -> int:
+    return int(word) if word.isdigit() else _NUMBER_WORDS[word.lower()]
 _MINUTES_RE = re.compile(r"\b(\d{1,2})\s*(?:-|\s)?\s*(?:minutes?|mins?)\b", re.I)
 
 MOODS: dict[str, dict] = {
@@ -293,7 +301,7 @@ def parse_prompt(prompt: str, *, seed: int | None = None,
     bars = None
     mb = _BARS_RE.search(text)
     if mb:
-        bars = max(2, min(400, int(mb.group(1))))
+        bars = max(2, min(400, _count(mb.group(1))))
     mm = _MINUTES_RE.search(text)
     if bars is None and mm:
         bars = max(8, min(400, int(mm.group(1)) * 30))

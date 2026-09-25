@@ -170,7 +170,8 @@ def _melodic_minor(notes: list[MelNote], harmony: list[Harmony], key: Key) -> No
 # ---------------------------------------------------------------------------
 def figurate(melody: list[MelNote], harmony: list[Harmony], key: Key, start: F, unit: F,
              beat: F, bar: F, low: int, high: int, leaps: float = 0.5,
-             avoid: set | None = None, adagio: bool = False, rng=None) -> list[MelNote]:
+             avoid: set | None = None, adagio: bool = False, rng=None,
+             reach: int = 9, sweep: bool = False) -> list[MelNote]:
     """Diminution: each note of the tune (from ``start``, all but the last)
     becomes a run of notes of value ``unit`` that begins on it and finds its
     way to the next. ``leaps`` is how readily the figure arpeggiates rather
@@ -209,7 +210,7 @@ def figurate(melody: list[MelNote], harmony: list[Harmony], key: Key, start: F, 
             fig = None
             if plans[i] is not None:
                 fig = _figure(n, notes[i + 1], harmony, key, unit, beat, bar, low, high, leaps,
-                              signature, group, plans[i])
+                              signature, group, plans[i], reach, sweep)
             if fig is None:
                 out.append(replace(n, marks=list(n.marks), graces=list(n.graces)))
                 continue
@@ -286,8 +287,8 @@ def _strength(t: F, beat: F, unit: F, bar: F) -> int:
 
 
 def _figure(n: MelNote, nxt: MelNote, harmony: list[Harmony], key: Key, unit: F, beat: F,
-            bar: F, low: int, high: int, leaps: float, signature, group: int, hold: F = F(0)
-            ) -> list[MelNote] | None:
+            bar: F, low: int, high: int, leaps: float, signature, group: int, hold: F = F(0),
+            reach: int = 9, sweep: bool = False) -> list[MelNote] | None:
     """The best figure from note ``n`` to ``nxt``: slot 0 is the note itself
     (sounding for ``hold``, or one ``unit`` when there is no hold), and every
     later slot is a ``unit`` chosen by dynamic programming."""
@@ -298,7 +299,7 @@ def _figure(n: MelNote, nxt: MelNote, harmony: list[Harmony], key: Key, unit: F,
     scale = set(key.scale_pcs)
     if key.is_minor:
         scale |= {(key.tonic_pc + 11) % 12}
-    lo, hi = max(low, n.midi - 9), min(high, n.midi + 9)
+    lo, hi = max(low, n.midi - reach), min(high, n.midi + reach)
     target = nxt.midi
     cands: list[list[int]] = [[n.midi]]
     for j in range(1, k):
@@ -368,10 +369,15 @@ def _figure(n: MelNote, nxt: MelNote, harmony: list[Harmony], key: Key, unit: F,
                         c += 2.5
                     elif (cur - prev) * (m - cur) > 0 and strength[j - 1] > 0:
                         c += 0.4               # an accented passing note is weaker
-                if prev is not None and abs(cur - prev) >= 5 and (m - cur) * (cur - prev) > 0 \
+                if sweep:
+                    # a run sweeps on in one direction rather than circling
+                    if prev is not None:
+                        c += -0.45 if (cur - prev) * (m - cur) > 0 else 0.45
+                elif prev is not None and abs(cur - prev) >= 5 and (m - cur) * (cur - prev) > 0 \
                         and abs(m - prev) > 9:
                     c += 1.0                   # two leaps the same way past a ninth
-                c += 0.04 * abs(m - n.midi)
+                if not sweep:
+                    c += 0.04 * abs(m - n.midi)
                 key2 = (cur, m)
                 if key2 not in nxt_states or c < nxt_states[key2][0]:
                     nxt_states[key2] = (c, path + [m])

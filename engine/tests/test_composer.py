@@ -402,3 +402,33 @@ def test_named_dances_and_pieces_keep_their_metre(prompt, metre):
     c, _ = _compose(prompt)
     assert _errors(c.msn) == []
     assert tuple(c.time) in metre
+
+
+@pytest.mark.parametrize("prompt,scope,bars", [
+    ("Write a 4 bar motif in the style of Chopin", "motif", 4),
+    ("An 8-bar theme in the style of Mozart", "theme", 8),
+    ("A four-bar phrase in G major", "phrase", 4),
+    ("Write a short introduction in the style of Rachmaninoff", "introduction", 4),
+    ("Write a cadenza in the style of Liszt", "cadenza", 8),
+    ("Give me a chord progression in C minor like Rachmaninoff", "progression", 8),
+])
+def test_part_of_a_piece_is_written_when_only_a_part_is_asked_for(prompt, scope, bars):
+    c, score = _compose(prompt)
+    assert _errors(c.msn) == []
+    assert c.scope == scope
+    assert score.measure_count == bars
+    assert "barline=final" in c.msn
+
+
+def test_a_progression_prints_its_chord_names_and_a_melody_can_stand_alone():
+    from motif.engrave.musicxml import to_musicxml
+    c, score = _compose("Give me a chord progression in C minor like Rachmaninoff")
+    xml = to_musicxml(score)
+    assert xml.count("<harmony") >= 6
+    assert c.summary["progression"][0] in ("i", "i6", "i(add6)", "i(add9)")
+    m, score = _compose("Just a melody in the style of Schubert, no accompaniment")
+    assert m.melody_only and _errors(m.msn) == []
+    lh = [n for meas in score.parts[0].measures for v in meas.voices.values() for n in v
+          if n.staff == 2 and n.pitches]
+    assert lh == []
+    assert score.metadata.get("style") == "schubert"

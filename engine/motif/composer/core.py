@@ -21,7 +21,8 @@ from ..notation.to_score import to_score
 from ..plan import CompositionPlan
 from ..score import Score
 from ..theory.pitch import Key, Pitch
-from .form import FormPlan, PhraseSpec, choose_metre, detect_genre, genre_family, plan_form
+from .form import (SCOPE_BARS, FormPlan, PhraseSpec, choose_metre, detect_genre, detect_scope,
+                   genre_family, melody_only, plan_form)
 from .harmony import (Harmony, PhraseHarmonySpec, harmony_at, harmony_style, plan_phrase,
                       revise, spell)
 from .melody import (GENRE_CELLS, MelNote, Motif, MelodyWriter, PhrasePlan, _random_motif,
@@ -97,14 +98,25 @@ class Composer:
         elif named is not None and named[0] == self.prof.name:
             self.display = named[1]
         self.key = Key.parse(plan.key)
+        #: the part of a piece asked for (a motif, a theme …), if only a part
+        self.scope = None if form else detect_scope(plan.prompt or "")
+        #: the tune alone, with no accompaniment
+        self.melody_only = melody_only(plan.prompt or "")
         self.genre = form or detect_genre(plan.prompt) or plan.form
         if genre_family(self.genre) == "concerto" and \
                 (getattr(plan, "ensemble", None) or "solo_piano") != "piano_concerto":
             self.genre = "ternary"             # only a piano concerto is written as one
         self.family = genre_family(self.genre)
-        _retitle(plan, self.genre, named=bool(detect_genre(plan.prompt)) and not form)
+        low = (plan.prompt or "").lower()
+        scope_word = self.scope
+        if self.scope == "theme":
+            scope_word = "melody" if "melody" in low else "tune" if "tune" in low else "theme"
+        _retitle(plan, scope_word or self.genre,
+                 named=(bool(detect_genre(plan.prompt)) or bool(self.scope)) and not form)
         if getattr(plan, "time_given", False) or not plan.prompt:
             self.time = tuple(plan.time)
+        elif self.scope in ("cadenza", "progression"):
+            self.time = (4, 4)
         else:
             self.time = choose_metre(self.family, self.prof, self.rng, self.genre)
         self.bar = bar_length(self.time)
@@ -125,6 +137,8 @@ class Composer:
             elif self.beat == F(2):
                 bpm = round(bpm * 0.6)
             self.tempo, self.tempo_text = bpm, words
+            if self.scope == "cadenza":
+                self.tempo, self.tempo_text = 96, "Liberamente"
         self._last_dyn: str | None = None
         self._figures: set = set()               # figurations the variations have used
         #: a piece for a learner: plain rhythms, an easy left hand, no ornaments
@@ -164,7 +178,13 @@ class Composer:
         self._say("planning", "Planning the form", "", 0.02)
         target = getattr(plan, "length_bars", 0) or plan.total_bars or 48
         options: dict = {}
-        if self.family == "variations":
+        if self.scope:
+            given = getattr(plan, "length_bars", 0)
+            short = any(w in (plan.prompt or "").lower() for w in ("short", "brief", "tiny"))
+            target = given or (SCOPE_BARS[self.scope] // (2 if short and self.scope not in
+                                                          ("motif", "introduction") else 1))
+            options = {"scope": self.scope}
+        elif self.family == "variations":
             count, large = _variations_asked(plan.prompt or "")
             if getattr(plan, "length_bars", 0):
                 large = target >= 96
@@ -233,9 +253,13 @@ class Composer:
                 w = self._recall(written[ps.recall], ps, t, written)
             elif ps.kind == "intro":
                 w = self._intro(ps, t, hstyle)
+            elif ps.kind == "progression":
+                w = self._progression(ps, t, hstyle)
             else:
                 w = self._phrase(ps, t, hstyle, mstyle, writer, last_note, written, upbeat,
                                  tail, final=(i == n - 1))
+            if ps.variation == "runs" and w.melody:
+                w.melody = self._runs(w.melody, w.harmony, ps, t)
             if ps.kind in ("antecedent", "sentence") and not writer.theme_bars and \
                     ps.recall is None and w.melody:
                 writer.theme_bars = _by_bar(w.melody, t, self.bar, ps.bars)
@@ -252,6 +276,8 @@ class Composer:
         msn = sheet.to_msn()
         piece = parse_msn(msn)
         score, _issues = to_score(piece)
+        if self.scope == "progression":
+            _chord_symbols(score, written, self.bar)
         score.metadata.update({"style": prof.name, "form": form.genre, "engine": "motif",
                                "seed": plan.seed, "prompt": plan.prompt,
                                "character": plan.character, "ensemble": self.ensemble})
@@ -315,7 +341,11 @@ class Composer:
                              "words": ps.words, "recall": ps.recall is not None,
                              "variation": ps.variation, "forces": ps.forces,
                              "tempo_words": ps.tempo_words, "register": ps.register})
+        progression = [h.roman for w in written for h in w.harmony] \
+            if self.scope == "progression" else []
         return {"genre": self.genre, "family": self.family, "bars": int(end / self.bar),
+                "scope": self.scope, "melody_only": self.melody_only,
+                "progression": progression,
                 "key": str(self.key), "time": tuple(self.time), "tempo": self.tempo,
                 "tempo_text": self.tempo_text, "ensemble": self.ensemble,
                 "style": self.display, "composer": self.prof.name,
@@ -341,6 +371,18 @@ class Composer:
         if roles and roles[0] in ("idea", "recall:0") and writer.motif.anacrusis:
             return sum(writer.motif.anacrusis, F(0))
         return F(0)
+
+    def _progression(self, ps: PhraseSpec, t: F, hstyle) -> Written:
+        """A chord progression on its own: the harmony of a phrase, planned
+        the way every phrase's harmony is — tonic, answer, predominant,
+        cadence — in the composer's vocabulary, the best of many plans."""
+        spec = PhraseHarmonySpec(key=ps.key, start=t, bars=ps.bars, bar_len=self.bar,
+                                 cadence=ps.cadence, kind="open", beat=self.beat,
+                                 presentation=ps.bars >= 4, response_shift=self.rng.choice(
+                                     [o for o, _ in _RESPONSES.get(self.prof.harmony,
+                                                                   _RESPONSES["romantic"])]))
+        harmony = plan_phrase(spec, hstyle, self.rng, tries=self.care.harmony_tries)
+        return Written(ps, t, harmony, [], [])
 
     def _intro(self, ps: PhraseSpec, t: F, hstyle) -> Written:
         """The accompaniment alone: the tonic, perhaps coloured, over a pedal —
@@ -563,6 +605,22 @@ class Composer:
         return figurate(melody, harmony, ps.key, t, unit, self.beat, self.bar, lo, hi, leaps,
                         avoid=self._figures)
 
+    def _runs(self, melody: list[MelNote], harmony: list[Harmony], ps: PhraseSpec,
+              t: F) -> list[MelNote]:
+        """A cadenza: the phrase's line becomes the skeleton of runs that
+        break every chord and sweep across the keyboard — sextuplets for a
+        virtuoso, sixteenths otherwise — over the held harmony."""
+        body = [m for m in melody if m.onset >= t]
+        if not body:
+            return melody
+        unit = F(1, 6) if (_virtuoso(self.prof) and self.beat == 1) else \
+            F(1, 4) if self.beat != F(3, 2) else F(1, 4)
+        mst = melody_style(self.prof.melody)
+        lo = max(55, min(m.midi for m in body) - 10)
+        hi = max(mst.climax_high, max(m.midi for m in body) + 12)
+        return figurate(melody, harmony, ps.key, t, unit, self.beat, self.bar, lo, hi, 0.9,
+                        avoid=set(), reach=17, sweep=True)
+
     def _adagio(self, melody: list[MelNote], harmony: list[Harmony], ps: PhraseSpec,
                 t: F) -> list[MelNote]:
         """A slow variation sings the theme with its long notes held and their
@@ -634,13 +692,19 @@ class Composer:
             _melody_to_voice(lh if ps.register == "tenor" else rh, w.melody, fill, w.harmony,
                              w.start, prev_h)
         _group_tuplets(rh.notes)
+        if self.scope == "cadenza" and rh.notes:
+            # a cadenza comes to rest on a trill over the dominant
+            last = max(rh.notes, key=lambda n: n.onset)
+            if "tr" not in last.marks:
+                last.marks = list(last.marks) + ["tr"]
         # the last melody note becomes a full chord
-        _final_rh_chord(rh, written[-1], final_bar)
+        if not self.melody_only:
+            _final_rh_chord(rh, written[-1], final_bar)
         # a singing inner voice under the tune, where the left hand leaves room
         for w in written:
             ps = w.spec
             if ps.role in ("theme", "return", "contrast") and ps.texture in _LH_ONLY and \
-                    ps.register != "tenor" and \
+                    ps.register != "tenor" and not self.melody_only and \
                     ps.variation != "octaves" and w.melody and \
                     self.rng.random() < prof.inner:
                 rh2.notes.extend(_inner_line(w, self.beat, final_bar))
@@ -670,15 +734,25 @@ class Composer:
             ctx.tempo = float(self.tempo) * ps.tempo_scale
             span_end = w.start + self.bar * ps.bars
             last = wi == len(written) - 1
+            if self.melody_only:
+                w.texture = []
+                continue
             tex = realise(ps.texture, w.harmony, w.start, final_bar if last else span_end, ctx)
-            if last:
+            if last and ps.texture == "chorale":
+                tex += realise("chorale", [harmony_at(w.harmony, final_bar)], final_bar,
+                               final_bar + self.bar, ctx)
+            elif last:
                 h = harmony_at(w.harmony, final_bar)
                 tex += final_chord(h, final_bar, self.bar, ctx)
             elif ps.cadence in ("PAC", "HC", "IAC", "plagal") and ps.texture in _FLOWING and \
                     self.rng.random() < 0.45:
                 tex = _breathe(tex, w.harmony, span_end, self.bar, self.beat, ctx)
             w.texture = tex
-            if ps.register == "tenor":
+            if ps.texture == "chorale":
+                # a progression's chords are the right hand's own part
+                _texture_to_voices([n for n in tex if n.staff == "RH"], w.harmony, rh, rh)
+                _texture_to_voices([n for n in tex if n.staff != "RH"], w.harmony, lh, lh)
+            elif ps.register == "tenor":
                 # the right hand is free of the tune: its chords are the upper voice
                 _texture_to_voices([n for n in tex if n.staff == "RH"], w.harmony, rh, rh)
                 _texture_to_voices([n for n in tex if n.staff != "RH"], w.harmony, lh2, lh2)
@@ -828,7 +902,7 @@ class Composer:
                 rh.marks.append(Mark(after[0].onset, "dim"))
                 rh.marks.append(Mark(after[-1].onset, "end"))
         # pedal with every change of harmony (never under a march's detached chords)
-        if ps.texture == "march":
+        if ps.texture == "march" or self.melody_only:
             pass
         elif prof.pedal == "harmony":
             for h in w.harmony:
@@ -957,6 +1031,49 @@ def _virtuoso(prof: Profile) -> bool:
 
 def prof_pedal(prof: Profile) -> bool:
     return prof.harmony in ("russian", "romantic", "impressionist")
+
+
+#: MusicXML's names for the kinds of chord, and how each is written.
+_SYMBOL_KINDS = {
+    "maj": ("major", ""), "min": ("minor", "m"), "dim": ("diminished", "dim"),
+    "aug": ("augmented", "+"), "dom7": ("dominant", "7"), "maj7": ("major-seventh", "maj7"),
+    "min7": ("minor-seventh", "m7"), "dim7": ("diminished-seventh", "dim7"),
+    "half_dim7": ("half-diminished", "m7b5"), "sus4": ("suspended-fourth", "sus4"),
+    "sus2": ("suspended-second", "sus2"), "six": ("major-sixth", "6"),
+    "min6": ("minor-sixth", "m6"), "min_add6": ("minor-sixth", "m6"),
+    "min_maj7": ("major-minor", "m(maj7)"), "dom9": ("dominant-ninth", "9"),
+    "maj9": ("major-ninth", "maj9"), "min9": ("minor-ninth", "m9"), "add9": ("major", "add9"),
+    "min_add9": ("minor", "m(add9)"), "dom7b9": ("dominant", "7(b9)"),
+    "maj7_add9": ("major-ninth", "maj9"), "dom13": ("dominant-13th", "13"),
+    "aug_maj7": ("augmented-seventh", "+maj7"), "it6": ("Italian", "It+6"),
+    "fr6": ("French", "Fr+6"), "ger6": ("German", "Ger+6"),
+}
+
+
+def _chord_symbols(score: Score, written: list[Written], bar: F) -> None:
+    """Chord names over a progression's chords, as a lead sheet has them."""
+    from ..score import DIVISIONS, ChordSymbol
+    part = score.parts[0]
+    for w in written:
+        for h in w.harmony:
+            index = int(h.onset // bar)
+            if index >= len(part.measures):
+                continue
+            at = int((h.onset - index * bar) * DIVISIONS)
+            pos, target = 0, None
+            for n in part.measures[index].voices.get(1, []):
+                if n.staff != 1 or n.grace:
+                    continue
+                if pos >= at:
+                    target = n
+                    break
+                pos += n.duration
+            if target is None or target.chord_symbol is not None:
+                continue
+            chord = h.chord
+            kind, text = _SYMBOL_KINDS.get(chord.quality, ("major", ""))
+            bass = chord.bass_pitch(3) if chord.inversion else None
+            target.chord_symbol = ChordSymbol(chord.root, kind, bass, text)
 
 
 #: Pieces that keep a steady pulse from section to section.
@@ -1420,6 +1537,9 @@ _GENRE_TITLES = {
     "bagatelle": "Bagatelle", "novelette": "Novelette", "nocturno": "Notturno",
     "caprice": "Caprice", "capriccio": "Capriccio", "serenade": "Serenade",
     "idyll": "Idyll", "album leaf": "Albumblatt", "albumblatt": "Albumblatt",
+    "motif": "Motif", "phrase": "Phrase", "theme": "Theme", "introduction": "Introduction",
+    "melody": "Melody", "tune": "Tune",
+    "cadenza": "Cadenza", "progression": "Chord Progression",
 }
 _FORMAL = ("Concerto", "Sonata", "Fugue", "Invention", "Waltz", "Nocturne", "Prelude",
            "Étude", "Rondo", "Mazurka", "Scherzo", "Ballade", "Rhapsody", "Intermezzo",

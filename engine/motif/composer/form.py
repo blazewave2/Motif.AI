@@ -12,6 +12,7 @@ which earlier phrase it brings back, so the music is heard to come home.
 from __future__ import annotations
 
 import random
+import re
 from dataclasses import dataclass, field
 
 from ..theory.pitch import Key
@@ -75,8 +76,12 @@ def plan_form(genre: str, prof: Profile, key: Key, target_bars: int,
               rng: random.Random, character: str = "", **options) -> FormPlan:
     """Lay out a piece of about ``target_bars`` bars in ``genre`` (``options``
     say more about forms that take them: how many variations, how long a
-    theme)."""
+    theme, or — as ``scope`` — the part of a piece that was asked for)."""
     genre = (genre or "").lower()
+    if options.get("scope"):
+        plan = _fragment(prof, key, target_bars, rng, character, **options)
+        _dress_for_genre(plan, genre, prof)
+        return plan
     fn = _TEMPLATES.get(_genre_family(genre), _ternary)
     plan = fn(prof, key, max(8, target_bars), rng, character, **options)
     plan.genre = genre or plan.genre
@@ -167,13 +172,67 @@ GENRE_WORDS = (
 )
 
 
+_NOT_A_GENRE = re.compile(r"\s+(film|movie|game|scene|story|novel|world|series|show|trailer|"
+                          r"soundtrack|book|land|tale\b)")
+
+
 def detect_genre(text: str) -> str | None:
-    """The kind of piece a request names, if it names one."""
+    """The kind of piece a request names, if it names one ("a fantasy film"
+    names a film, not a fantasia)."""
     t = (text or "").lower()
     for w in GENRE_WORDS:
-        if w in t:
-            return w
+        i = t.find(w)
+        while i >= 0:
+            if not _NOT_A_GENRE.match(t, i + len(w)):
+                return w
+            i = t.find(w, i + 1)
     return None
+
+
+def detect_scope(text: str) -> str | None:
+    """The part of a piece a request asks for, when it asks for only a part:
+    a motif, a phrase, a theme (or melody, or tune), an introduction, a
+    cadenza or a chord progression."""
+    import re
+    t = (text or "").lower()
+    if re.search(r"\b(chord progression|progression|chord sequence|sequence of chords)\b", t):
+        return "progression"
+    if "cadenza" in t and "concerto" not in t:
+        return "cadenza"
+    if re.search(r"\b(introduction|intro)\b", t) and not \
+            re.search(r"\bwith (an? |the )?(short |brief |slow )?(introduction|intro)\b", t):
+        return "introduction"
+    if re.search(r"\b(motif|motive|musical idea|melodic idea|melodic cell)\b", t) and not \
+            re.search(r"\b(on|from|using|around|based on|built on|develop|out of)\s+"
+                      r"(an?|this|the|my)?\s*(\w+\s+)?(motif|motive)", t):
+        return "motif"
+    named = detect_genre(t)
+    if named and named not in ("song",):
+        return None
+    if re.search(r"\bphrase\b", t):
+        return "phrase"
+    if re.search(r"\b(theme|melody|tune)\b", t) and not \
+            re.search(r"variation|on a theme|theme (of|by|from)|themes? and|theme song", t):
+        return "theme"
+    return None
+
+
+#: Words asking for the tune alone.
+_MELODY_ONLY = ("no accompaniment", "without accompaniment", "unaccompanied", "melody only",
+                "only the melody", "just the melody", "just a melody", "melody alone",
+                "tune alone", "just the tune", "just a tune", "only a melody", "single line",
+                "melodic line only", "a cappella", "no left hand", "without a left hand",
+                "right hand only", "just the right hand")
+
+
+def melody_only(text: str) -> bool:
+    t = (text or "").lower()
+    return any(w in t for w in _MELODY_ONLY)
+
+
+#: How long each part of a piece is when the request doesn't say.
+SCOPE_BARS = {"motif": 4, "phrase": 8, "theme": 8, "introduction": 4, "cadenza": 8,
+              "progression": 8}
 
 
 #: Usual metres for each family of pieces, with how often each is chosen.
@@ -553,8 +612,8 @@ def _concerto(prof: Profile, key: Key, bars: int, rng: random.Random, character:
                    variation="octaves" if prof.octave_climax else "", new_section=True,
                    forces="tutti", words=words.get("climax", "")))
     ph.append(_phr("Cad", "cadenza", "development", 8 if bars >= 96 else 4, key, "HC", 0.9,
-                   "sweep16" if prof.harmony != "baroque" else "walking",
-                   new_section=True, forces="cadenza", variation="octaves", words="Cadenza"))
+                   "sustained" if prof.harmony != "baroque" else "walking",
+                   new_section=True, forces="cadenza", variation="runs", words="Cadenza"))
     ph.append(_phr("coda", "closing", "closing", 4, key, "PAC", 0.95,
                    _tex(prof, "climax", rng, tx), new_section=True, forces="tutti"))
     return FormPlan("concerto", ph)
@@ -601,6 +660,41 @@ def _rondo(prof: Profile, key: Key, bars: int, rng: random.Random, character: st
     ph.append(_phr("coda", "closing", "closing", 8 if big else 4, key, "PAC", 0.75,
                    _tex(prof, "closing", rng, tx), new_section=True))
     return FormPlan("rondo", ph)
+
+
+def _fragment(prof: Profile, key: Key, bars: int, rng: random.Random, character: str,
+              scope: str = "theme", **_) -> FormPlan:
+    """Part of a piece, as asked: a motif, a phrase, a theme, an
+    introduction, a cadenza or a chord progression — each complete in
+    itself and ready to be built on."""
+    tx: dict = {}
+    tex = _tex(prof, "theme", rng, tx)
+    words = prof.words.get("theme", "")
+    ph: list[PhraseSpec] = []
+    if scope == "motif":
+        ph.append(_phr("A", "theme", "motif", max(1, min(bars, 8)), key,
+                       "none" if bars <= 2 else "PAC", 0.5, tex, new_section=True,
+                       words=words))
+    elif scope == "phrase" and bars <= 8:
+        ph.append(_phr("A", "theme", "sentence", max(2, bars), key, "PAC", 0.5, tex,
+                       new_section=True, words=words))
+    elif scope in ("phrase", "theme"):
+        ph += _theme_group("A", "theme", key, max(4, bars), prof, rng, tx, 0.5, words=words,
+                           short=bars <= 8)
+    elif scope == "introduction":
+        if bars >= 6:
+            ph.append(_phr("intro", "intro", "intro", 2, key, "none", 0.35,
+                           tex if tex in _INTRO_TEXTURES else "sustained", new_section=True))
+        ph.append(_phr("A", "theme", "antecedent", bars - 2 if bars >= 6 else max(2, bars),
+                       key, "HC", 0.45, tex, new_section=not ph, words=words))
+    elif scope == "cadenza":
+        ph.append(_phr("Cad", "cadenza", "development", max(4, bars), key, "HC", 0.9,
+                       "sustained" if prof.harmony != "baroque" else "walking",
+                       new_section=True, variation="runs", words="Cadenza"))
+    else:   # a chord progression
+        ph.append(_phr("A", "theme", "progression", max(2, bars), key, "PAC", 0.5, "chorale",
+                       new_section=True))
+    return FormPlan(scope, ph)
 
 
 #: The kinds of variation each idiom reaches for, in the order a set uses

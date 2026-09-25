@@ -554,8 +554,13 @@ def roles_for(kind: str, bars: int) -> list[str]:
             return ["flow", "cadence"][-bars:]
         body = ["recall:0", "recall:1", "fragment", "flow", "fragment", "flow"]
         return (body + ["flow"] * bars)[:bars - 1] + ["cadence"]
-    if kind == "intro":
+    if kind == "intro" or kind == "progression":
         return ["rest"] * bars
+    if kind == "motif":
+        # the idea itself: stated, and — given room — answered and closed
+        return {1: ["idea"], 2: ["idea", "idea2"], 3: ["idea", "idea2", "cadence"],
+                4: ["idea", "idea2", "repeat", "cadence"]}.get(
+            bars, ["idea", "idea2", "repeat", "repeat2"] + ["flow"] * (bars - 5) + ["cadence"])
     if bars <= 1:
         return ["cadence"]
     return (["idea", "idea2"] + ["flow"] * bars)[:bars - 1] + ["cadence"]
