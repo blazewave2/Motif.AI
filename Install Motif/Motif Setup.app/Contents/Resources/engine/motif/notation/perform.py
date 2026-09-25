@@ -115,14 +115,21 @@ def playback_tempos(bars, score: Score, words) -> list[TempoMark]:
             continue
         start_tempo = current
         target = start_tempo * factor
-        step = Fraction(1, 2) if span_end - pos <= 2 else Fraction(1)
+        # three or four steps are heard as one smooth change, and keep the
+        # (hidden) marks few enough not to crowd the editor's view
+        span = span_end - pos
+        step = max(Fraction(1, 2), Fraction(round(span * 2 / 4), 2)) if span > 2 \
+            else Fraction(1, 2)
         t = pos
+        last_bpm = None
         while t < span_end:
-            frac = float((t - pos + step) / (span_end - pos))
+            frac = float((t - pos + step) / span)
             frac = min(1.0, frac)
             eased = frac ** 1.4 if factor < 1 else frac ** 0.9
-            bpm = start_tempo + (target - start_tempo) * eased
-            out.append(_mark(bars, t, bpm))
+            bpm = round(start_tempo + (target - start_tempo) * eased)
+            if bpm != last_bpm:
+                out.append(_mark(bars, t, bpm))
+                last_bpm = bpm
             t += step
         current = target
     return out
@@ -147,7 +154,7 @@ def _mark(bars, pos: Fraction, bpm: float) -> TempoMark:
     starts = [b.start for b in bars]
     i = _bar_at(starts, pos)
     offset = int(round((pos - bars[i].start) * DIVISIONS))
-    return TempoMark(bars[i].msn.number, round(max(20.0, min(300.0, bpm)), 2),
+    return TempoMark(bars[i].msn.number, round(max(20.0, min(300.0, bpm))),
                      "quarter", "", False, offset=offset, visible=False)
 
 

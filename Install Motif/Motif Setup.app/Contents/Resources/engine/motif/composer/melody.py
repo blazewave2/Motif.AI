@@ -887,6 +887,8 @@ class MelodyWriter:
             c += _interval_cost(iv, st)
             if iv == 6:
                 c += 3.0
+            if iv == 3 and abs(_degree_of(m, plan.key)[0] - _degree_of(prev, plan.key)[0]) == 1:
+                c += 2.5          # an augmented second: a step that sounds like a leap
             if prev2 is not None:
                 last = prev - prev2
                 if abs(last) >= 5 and (m - prev) * last > 0:

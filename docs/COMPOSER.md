@@ -142,7 +142,18 @@ say what a line must do; the statistics say what lines usually do.
 or accented melody note that is not in the chord and does not resolve like a
 passing note — is recoloured (a seventh, an added sixth) or replaced by a
 chord doing the same job, without touching the cadence or the phrase's
-opening chord.
+opening chord. Parallel octaves or fifths between the tune and the bass —
+where the chord changes, or beat to beat across a passing note — are then
+taken out as a composer takes them out, by putting another note of the chord
+in the bass (a first inversion, another position of a seventh chord).
+
+**Returns.** A phrase that comes back keeps its tune and its chords, moved
+to its new key. When it comes back in the other mode — a major second theme
+recapitulated in a minor tonic — every chord is moved degree for degree and
+the tune to the new scale. When it must close where it first only paused,
+the chord before the close becomes the dominant that best suits the tune
+above it and the last bar one tonic note, stepped into. A returning chord
+may come back richer, but never so that an accented note stops fitting it.
 
 ## Texture (`texture.py`)
 
