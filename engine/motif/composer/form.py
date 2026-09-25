@@ -110,6 +110,52 @@ _GENRE_TEXTURES = {
 }
 
 
+#: Intimate kinds of piece and the loudest each allows: their climax swells
+#: rather than storms.
+_GENTLE = (("lullaby", "mf"), ("berceuse", "mf"), ("cradle song", "mf"),
+           ("consolation", "f"), ("reverie", "f"), ("rêverie", "f"),
+           ("song without words", "f"), ("lyric piece", "f"), ("album leaf", "f"),
+           ("albumblatt", "f"), ("serenade", "f"), ("pastorale", "f"), ("prayer", "f"),
+           ("meditation", "f"), ("romance", "ff"), ("nocturne", "ff"), ("elegy", "ff"),
+           ("liebestraum", "ff"), ("barcarolle", "ff"), ("intermezzo", "ff"))
+
+#: Dances whose own accompaniment is a bass on the beat and chords after it.
+_OOM_PAH = ("waltz", "valse", "mazurka", "minuet", "menuet", "ländler", "landler",
+            "polonaise", "polka", "march", "marche")
+
+
+def dynamic_ceiling(genre: str) -> str:
+    """The loudest a kind of piece should get ("" for no limit)."""
+    g = (genre or "").lower()
+    return next((cap for name, cap in _GENTLE if name in g), "")
+
+
+def swell_texture(prof: Profile) -> str:
+    """How the composer's left hand grows without turning into a dance:
+    broader, quicker arpeggios."""
+    grows = any("sweep16" in options for options in prof.textures.values())
+    return "sweep16" if grows else "sweep"
+
+
+def keep_off_the_dance_floor(plan: FormPlan, genre: str, time: tuple[int, int],
+                             prof: Profile) -> None:
+    """The tolling bass with chords after the beat is grand in common time,
+    but in three (or a compound time) it is a waltz's oom-pah-pah: a piece
+    that is not a dance swells in arpeggios instead, and an intimate one
+    always does."""
+    g = (genre or "").lower()
+    if any(d in g for d in _OOM_PAH):
+        return
+    gentle = bool(dynamic_ceiling(g))
+    if not gentle and time[0] % 3:
+        return
+    for p in plan.phrases:
+        if p.texture != "bells":
+            continue
+        others = [t for t in prof.textures.get(p.role, []) if t != "bells"]
+        p.texture = swell_texture(prof) if gentle or not others else others[0]
+
+
 def _dress_for_genre(plan: FormPlan, genre: str, prof: Profile) -> None:
     for name, by_role in _GENRE_TEXTURES.items():
         if name in genre:

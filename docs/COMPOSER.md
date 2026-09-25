@@ -166,7 +166,10 @@ walking bass; open pedalled sonorities; and, for inventions, the subject
 answered in the left hand an octave lower while the right hand plays a
 countersubject that is kept consonant with it. Every realiser voice-leads
 from the chord before, keeps under the melody, and keeps each hand inside
-its reach.
+its reach. The bells belong to common time: in three, or in a compound
+time, a bass on the beat with chords after it is a waltz. So there a piece
+that is not a dance grows in wider arpeggios, or with octaves pounding on
+every beat.
 
 ## The shape of the whole
 
@@ -182,8 +185,12 @@ suspensions that fall to their resolutions.
 
 ## Performance
 
-Dynamics follow each phrase's energy; hairpins swell into the phrase's high
-point and away from it over a bar or two; slurs follow the breathing of the
+Dynamics follow each phrase's energy, within the composer's range and the
+genre's. An intimate kind of piece swells rather than storms: a lullaby or
+berceuse stays at *mf* or below, and a consolation, reverie or song without
+words at *f*. A nocturne, romance or elegy may reach *ff*. The whole scale
+is drawn in beneath that ceiling so the climax still stands out. Hairpins
+swell into the phrase's high point and away from it over a bar or two; slurs follow the breathing of the
 line (a two-bar gesture in Classical music, a whole line in Romantic); at a
 quick Classical tempo notes that leap or repeat are detached and the note
 before a full close takes a trill; the pedal changes with the harmony.

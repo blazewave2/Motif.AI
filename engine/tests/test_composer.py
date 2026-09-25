@@ -443,3 +443,38 @@ def test_a_piece_asked_for_at_a_length_is_written_at_that_length(prompt, bars):
     c, score = _compose(prompt, seed=2)
     assert _errors(c.msn) == []
     assert score.measure_count == bars
+
+
+_LEVELS = ["ppp", "pp", "p", "mp", "mf", "f", "ff", "fff"]
+
+
+def _loudest(score) -> str:
+    marks = [d.value for part in score.parts for m in part.measures for d in m.directions
+             if d.kind == "dynamics" and d.value in _LEVELS]
+    return max(marks, key=_LEVELS.index)
+
+
+@pytest.mark.parametrize("prompt,ceiling", [
+    ("A consolation in D flat major in the style of Liszt", "f"),
+    ("A lullaby in the style of Brahms", "mf"),
+    ("A Rachmaninoff nocturne", "ff"),
+])
+def test_an_intimate_piece_swells_rather_than_storms(prompt, ceiling):
+    for seed in (1, 17):
+        c, score = _compose(prompt, seed=seed)
+        assert _LEVELS.index(_loudest(score)) <= _LEVELS.index(ceiling), (seed, _loudest(score))
+        # and its climax is carried by the arpeggios, not by a tolling bass
+        assert "bells" not in {w.spec.texture for w in c.written}
+
+
+def test_no_oom_pah_under_a_piece_in_three_that_is_not_a_dance():
+    """A deep octave on the beat and chords after it is grand in four, but in
+    three it is a waltz."""
+    for seed in (1, 2, 3, 4):
+        c, _ = _compose("A Rachmaninoff prelude in C sharp minor", seed=seed)
+        textures = {w.spec.texture for w in c.written}
+        if c.time[0] % 3 == 0:
+            assert "bells" not in textures
+        assert _errors(c.msn) == []
+    w, _ = _compose("A Tchaikovsky waltz", seed=1)
+    assert w.time == (3, 4)

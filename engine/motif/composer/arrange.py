@@ -390,6 +390,7 @@ def _line(composer, written, chords, p: PartDef, phrase_at, bar: F, beat: F) -> 
 def _dynamics_for(v: Voice, written, composer) -> None:
     """Each part gets the phrase dynamics wherever it plays."""
     from .core import _energy_dynamic
+    from .form import dynamic_ceiling
     own = {m.onset: m.value for m in v.marks if m.kind == "dyn"}
     last = None
     for w in written:
@@ -405,7 +406,7 @@ def _dynamics_for(v: Voice, written, composer) -> None:
         if composer.ensemble == "piano_concerto" and w.spec.forces == "solo_lead" and \
                 not v.label.startswith("Pno"):
             energy = min(energy, 0.35)          # the orchestra accompanies the soloist softly
-        dyn = _energy_dynamic(composer.prof, energy)
+        dyn = _energy_dynamic(composer.prof, energy, dynamic_ceiling(composer.genre))
         if w.spec.role == "closing" and w.spec.section == "coda":
             dyn = composer.prof.dynamics[0]
         if dyn != last:

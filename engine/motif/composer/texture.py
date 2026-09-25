@@ -339,8 +339,9 @@ def block(h: Harmony, t0: F, dur: F, ctx: TextureContext, rh_inner: bool = True
     """A chorale: the bass (in octaves when the music is strong) with the
     chord above it, and the chord's upper notes held in the right hand under
     the melody where the hand can reach them."""
-    if ctx.energy > 0.8 and dur >= 2 * ctx.beat and ctx.grand:
+    if ctx.energy > 0.8 and dur >= 2 * ctx.beat and ctx.grand and ctx.time[0] % 3:
         # at full strength the left hand tolls and answers, as in the bells
+        # (not in three, where that is a waltz: there the octaves pound on)
         return bells(h, t0, dur, ctx)
     out: list[TexNote] = []
     b = bass_note(h, ctx)
