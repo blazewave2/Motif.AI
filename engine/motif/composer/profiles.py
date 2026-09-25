@@ -272,6 +272,12 @@ _TEMPI: dict[str, dict[str, list[tuple[str, int]]]] = {
                "lively": [("Allegretto", 126)], "stormy": [("Allegro", 138)]},
     "invention": {"slow": [("Andante", 72)], "lyrical": [("Moderato", 88)],
                   "lively": [("Allegro", 112)], "stormy": [("Presto", 132)]},
+    # a theme for variations is plain and unhurried, so its variations can
+    # quicken and slow around it
+    "variations": {"slow": [("Andante", 66), ("Andante sostenuto", 60)],
+                   "lyrical": [("Andante", 76), ("Andante grazioso", 84), ("Allegretto", 96)],
+                   "lively": [("Allegretto", 108), ("Allegro moderato", 116)],
+                   "stormy": [("Allegro moderato", 112), ("Allegro", 126)]},
 }
 _TEMPI_FR = {
     "slow": [("Lent", 52), ("Très lent", 44), ("Lent et grave", 50)],

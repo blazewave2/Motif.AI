@@ -180,6 +180,42 @@ the climax with the whole orchestra and the piano's massive chords; a
 cadenza for the piano alone holds on the dominant; a coda brings everyone
 home. A Classical concerto opens with the orchestra's ritornello.
 
+## Theme and variations (`variation.py`)
+
+A set of variations keeps what the listener holds on to — the theme's two
+phrases, its cadences, its chords — and changes what the ear notices first.
+The theme is a period: a phrase that pauses on the dominant and one that
+answers it and closes. Each variation brings both phrases back and gives
+them a new dress, in the order a composer of the idiom would:
+
+- **figuration** — every note of the tune becomes a run of shorter notes
+  that starts on it, keeps chord tones on the beats, moves through passing
+  and neighbour notes only by step and arrives by step at the next note of
+  the tune. The runs are found by dynamic programming, and the variation
+  then prefers the figure it has used most, so it sounds like one idea
+  carried through; a later figural variation may not lead with the same
+  figure, and a finale breaks the chords into arpeggios;
+- **triplets** — the tune's note on each beat is kept as a skeleton and the
+  beats flow in triplets over plain chords;
+- **a running accompaniment** under the tune as it was, perhaps ornamented;
+- **the minore** (or *maggiore*) — every chord moved degree for degree into
+  the other mode (I to i, IV to iv, vi to VI), the tune moved to the new
+  scale with its leading tone kept where the dominant needs it and a
+  chromatic step kept a step, in a key with a real signature (D flat major's
+  minore is written in C sharp minor);
+- **the tune in the left hand**, cantabile, under soft repeated chords;
+- **a slow variation** — Adagio, or *Più lento* when the theme is already
+  slow — whose long notes are held and decorated on their last beat on the
+  way to the next, with grace notes and turns besides;
+- **a finale** — Allegro in arpeggios for Mozart and Haydn, or the theme at
+  its grandest in chords and octaves over tolling basses for Rachmaninoff
+  and Brahms — and a coda, brilliant or quietly remembering the theme.
+
+Each section is named at its head (*Tema*, *Var. I* …, *Coda*), closes with
+a double bar and takes its own tempo where it has one. A request that counts
+its variations gets that many; a short set has three, a large one a
+sixteen-bar theme.
+
 ## Working with the musician's own music
 
 *Continue* reads the opening of the tune already on the page (`listen.py`)

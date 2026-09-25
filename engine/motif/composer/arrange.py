@@ -416,7 +416,8 @@ def _keyboard(composer, written, end: F, p: PartDef, accompany: bool) -> list[Vo
     lh = Voice(prefix + "LH")
     ctx = TextureContext(composer.time, composer.bar, composer.beat, composer.key,
                          bass_low=composer.prof.bass_low, rng=composer.rng,
-                         tempo=float(composer.tempo))
+                         tempo=float(composer.tempo),
+                         grand=composer.prof.harmony not in ("classical", "baroque"))
     if not accompany:
         from .core import _group_tuplets, _melody_to_voice
         for w in written:
@@ -477,7 +478,8 @@ def _concerto_piano(composer, written, end: F, p: PartDef) -> list[Voice]:
     from .core import _virtuoso
     ctx = TextureContext(composer.time, composer.bar, composer.beat, composer.key,
                          bass_low=composer.prof.bass_low, rng=composer.rng,
-                         tempo=float(composer.tempo), virtuoso=_virtuoso(composer.prof))
+                         tempo=float(composer.tempo), virtuoso=_virtuoso(composer.prof),
+                         grand=composer.prof.harmony not in ("classical", "baroque"))
     ctx.melody_floor, ctx.melody_top = _rh_extent(rh, composer.bar, end) if rh.notes else ({}, {})
     for w in written:
         f = w.spec.forces

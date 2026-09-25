@@ -39,6 +39,7 @@ class PhraseSpec:
     #: piano accompanying) or cadenza.
     forces: str = ""
     register: str = ""           # "tenor": the tune moves to the left hand, under the harmony
+    tempo_words: str = ""        # a new tempo at the start of the section (Adagio, Allegro …)
 
 
 @dataclass
@@ -71,11 +72,13 @@ def _related(key: Key, which: str) -> Key:
 
 
 def plan_form(genre: str, prof: Profile, key: Key, target_bars: int,
-              rng: random.Random, character: str = "") -> FormPlan:
-    """Lay out a piece of about ``target_bars`` bars in ``genre``."""
+              rng: random.Random, character: str = "", **options) -> FormPlan:
+    """Lay out a piece of about ``target_bars`` bars in ``genre`` (``options``
+    say more about forms that take them: how many variations, how long a
+    theme)."""
     genre = (genre or "").lower()
     fn = _TEMPLATES.get(_genre_family(genre), _ternary)
-    plan = fn(prof, key, max(8, target_bars), rng, character)
+    plan = fn(prof, key, max(8, target_bars), rng, character, **options)
     plan.genre = genre or plan.genre
     if "fugue" in genre or "fugato" in genre:
         # a fugue answers its subject at the fifth, in the dominant
@@ -92,7 +95,8 @@ _INTRO_TEXTURES = ("nocturne", "sweep", "sweep16", "bells", "repeated", "waltz",
 
 def _add_intro(plan: FormPlan, prof: Profile, target_bars: int, rng: random.Random) -> None:
     """A bar or two of accompaniment alone, as so many Romantic pieces begin."""
-    if not plan.phrases or plan.genre in ("concerto", "continuation", "invention"):
+    if not plan.phrases or plan.genre in ("concerto", "continuation", "invention") or \
+            _genre_family(plan.genre) == "variations":
         return
     first = plan.phrases[0]
     if first.role != "theme" or first.texture not in _INTRO_TEXTURES or \
@@ -114,7 +118,7 @@ def genre_family(genre: str) -> str:
 #: Names of pieces a request may ask for, most specific first.
 GENRE_WORDS = (
     "etude-tableau", "étude-tableau", "etude tableau", "song without words", "moment musical",
-    "concerto",
+    "concerto", "theme and variations", "variations", "variation",
     "lyric piece", "gymnopédie", "gymnopedie", "gnossienne", "liebestraum", "consolation",
     "nocturne", "prelude", "prélude", "waltz", "valse", "mazurka", "polonaise", "sonatina",
     "sonata", "minuet", "menuet", "gavotte", "sarabande", "gigue", "invention", "fugue",
@@ -158,6 +162,7 @@ def _genre_family(genre: str) -> str:
     for fam, words in (
         ("continuation", ("continuation",)),
         ("concerto", ("concerto",)),
+        ("variations", ("variation",)),
         ("waltz", ("waltz", "valse", "ländler")),
         ("mazurka", ("mazurka", "polonaise")),
         ("sonata", ("sonata", "sonatina", "first movement")),
@@ -188,7 +193,7 @@ def _tex(prof: Profile, role: str, rng: random.Random, choice: dict) -> str:
     return choice[role]
 
 
-def _ternary(prof: Profile, key: Key, bars: int, rng: random.Random, character: str
+def _ternary(prof: Profile, key: Key, bars: int, rng: random.Random, character: str, **_
              ) -> FormPlan:
     """ABA' with a coda: preludes, romances, elegies, most character pieces."""
     tx: dict = {}
@@ -301,7 +306,7 @@ def _phrase_bars(x: float) -> int:
     return max(8, int(round(x / 8)) * 8)
 
 
-def _waltz(prof: Profile, key: Key, bars: int, rng: random.Random, character: str
+def _waltz(prof: Profile, key: Key, bars: int, rng: random.Random, character: str, **_
            ) -> FormPlan:
     tx: dict = {"theme": "waltz", "contrast": "waltz", "return": "waltz", "closing": "waltz"}
     b_key = _related(key, "relative" if key.is_minor else rng.choice(["dominant",
@@ -318,14 +323,14 @@ def _waltz(prof: Profile, key: Key, bars: int, rng: random.Random, character: st
     return FormPlan("waltz", phrases)
 
 
-def _mazurka(prof: Profile, key: Key, bars: int, rng: random.Random, character: str
+def _mazurka(prof: Profile, key: Key, bars: int, rng: random.Random, character: str, **_
              ) -> FormPlan:
     plan = _waltz(prof, key, bars, rng, character)
     plan.genre = "mazurka"
     return plan
 
 
-def _sonata(prof: Profile, key: Key, bars: int, rng: random.Random, character: str
+def _sonata(prof: Profile, key: Key, bars: int, rng: random.Random, character: str, **_
             ) -> FormPlan:
     """An exposition with two key areas, a development and a recapitulation."""
     tx: dict = {}
@@ -353,7 +358,7 @@ def _sonata(prof: Profile, key: Key, bars: int, rng: random.Random, character: s
     return FormPlan("sonata", ph)
 
 
-def _minuet(prof: Profile, key: Key, bars: int, rng: random.Random, character: str
+def _minuet(prof: Profile, key: Key, bars: int, rng: random.Random, character: str, **_
             ) -> FormPlan:
     tx: dict = {}
     tex = _tex(prof, "theme", rng, tx)
@@ -377,7 +382,7 @@ def _minuet(prof: Profile, key: Key, bars: int, rng: random.Random, character: s
     return FormPlan("minuet", ph)
 
 
-def _invention(prof: Profile, key: Key, bars: int, rng: random.Random, character: str
+def _invention(prof: Profile, key: Key, bars: int, rng: random.Random, character: str, **_
                ) -> FormPlan:
     tx: dict = {}
     tex = _tex(prof, "theme", rng, tx)
@@ -393,7 +398,7 @@ def _invention(prof: Profile, key: Key, bars: int, rng: random.Random, character
     return FormPlan("invention", ph)
 
 
-def _etude(prof: Profile, key: Key, bars: int, rng: random.Random, character: str
+def _etude(prof: Profile, key: Key, bars: int, rng: random.Random, character: str, **_
            ) -> FormPlan:
     plan = _ternary(prof, key, bars, rng, character)
     for p in plan.phrases:
@@ -404,7 +409,7 @@ def _etude(prof: Profile, key: Key, bars: int, rng: random.Random, character: st
     return plan
 
 
-def _continuation(prof: Profile, key: Key, bars: int, rng: random.Random, character: str
+def _continuation(prof: Profile, key: Key, bars: int, rng: random.Random, character: str, **_
                   ) -> FormPlan:
     """Carrying on from a piece that is already written: its theme developed
     away from home, a passage leading back, the theme restated and closed,
@@ -430,7 +435,7 @@ def _continuation(prof: Profile, key: Key, bars: int, rng: random.Random, charac
     return FormPlan("continuation", ph)
 
 
-def _concerto(prof: Profile, key: Key, bars: int, rng: random.Random, character: str
+def _concerto(prof: Profile, key: Key, bars: int, rng: random.Random, character: str, **_
               ) -> FormPlan:
     """A concerto first movement: an opening, the first theme, a passage to
     the second key and a lyrical second theme passed between piano and
@@ -488,9 +493,149 @@ def _concerto(prof: Profile, key: Key, bars: int, rng: random.Random, character:
     return FormPlan("concerto", ph)
 
 
+#: The kinds of variation each idiom reaches for, in the order a set uses
+#: them: the first is always a figuration, the last the finale.
+_PROGRAMMES = {
+    "classical": ["figural", "accomp", "minore", "triplets", "tenor", "adagio", "finale"],
+    "baroque": ["figural", "walking", "minore", "triplets", "finale"],
+    "romantic": ["triplets", "tenor", "agitato", "minore", "lento", "finale"],
+}
+
+_ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"]
+
+_THEME_NAME = {"it": "Tema", "de": "Thema", "fr": "Thème"}
+
+
+def _choose_variations(programme: list[str], n: int) -> list[str]:
+    """``n`` kinds of variation from a programme: the first figuration, the
+    change of mode near the middle, the slow variation just before the
+    finale, and the finale last."""
+    first, last = programme[0], programme[-1]
+    slow = next((k for k in programme if k in ("adagio", "lento")), None)
+    middle = [k for k in programme[1:-1] if k != slow]
+    body: list[str] = []
+    room = n - 2 - (1 if slow and n >= 5 else 0)
+    pool = list(middle)
+    while len(body) < room:
+        kind = pool[len(body) % len(pool)]
+        # the change of mode happens once
+        body.append(kind if kind != "minore" or "minore" not in body else pool[0])
+    if "minore" in programme and "minore" not in body and room >= 1:
+        body[len(body) // 2] = "minore"
+    out = [first] + body + ([slow] if slow and n >= 5 else []) + [last]
+    return out[:max(2, n)]
+
+
+def _variations(prof: Profile, key: Key, bars: int, rng: random.Random, character: str,
+                count: int = 5, long_theme: bool = False, **_) -> FormPlan:
+    """A theme and variations. The theme is a period — a phrase that pauses
+    on the dominant and one that answers it and closes — and every variation
+    keeps its phrases, cadences and chords while changing what the ear
+    notices first: a figuration that decorates each note of the tune, a
+    running accompaniment, the change of mode, the tune in the tenor, a slow
+    ornamented variation, a finale; then a coda."""
+    tx: dict = {}
+    idiom = "romantic" if prof.harmony in ("romantic", "russian", "film", "impressionist") \
+        else "baroque" if prof.harmony == "baroque" else "classical"
+    romantic = idiom == "romantic"
+    half = 8 if long_theme else 4
+    n = max(2, min(12, count))
+    kinds = _choose_variations(_PROGRAMMES[idiom], n)
+    tex = _tex(prof, "theme", rng, tx)
+    lang = prof.language if prof.language in _THEME_NAME else "it"
+    words = prof.words
+    ph: list[PhraseSpec] = [
+        _phr(_THEME_NAME[lang], "theme", "antecedent", half, key, "HC", 0.4, tex,
+             new_section=True, words=words.get("theme", "")),
+        _phr(_THEME_NAME[lang], "theme", "consequent", half, key, "PAC", 0.45, tex),
+    ]
+    busy = {"classical": "alberti", "baroque": "walking",
+            "romantic": "sweep16" if prof.octave_climax else "sweep"}[idiom]
+    plain = "block" if tex in ("alberti", "sweep", "sweep16") else tex
+    other = parallel_key_of(key)
+    scale = 1.0
+    used: set[tuple[str, str]] = set()
+    spare = [t for ts in prof.textures.values() for t in ts
+             if t not in ("tenor", "imitation", "fugato", "final")]
+    for v, kind in enumerate(kinds):
+        name = f"Var. {_ROMAN[v]}" if v < len(_ROMAN) else f"Var. {v + 1}"
+        vkey, variation, texture, energy, wds, role = key, "", tex, 0.5, "", "variation"
+        register, tempo_words, new_scale = "", "", 1.0
+        if kind == "figural":
+            variation, texture, energy = "figural", plain, 0.5
+            wds = "leggiero" if romantic else ""
+        elif kind == "triplets":
+            # chords under running triplets: no three against two
+            variation, texture, energy = "figural3", "block" if romantic else plain, 0.55
+            wds = "dolce" if romantic else ""
+        elif kind == "accomp":
+            variation, texture, energy = ("ornament" if prof.ornaments >= 0.2 else ""), busy, 0.55
+        elif kind == "walking":
+            texture, energy = "walking", 0.55
+        elif kind == "minore":
+            vkey, variation = other, "minore" if not key.is_minor else "maggiore"
+            texture = "repeated" if romantic else ("block" if tex == "alberti" else tex)
+            energy = 0.45
+            wds = "Minore" if not key.is_minor else "Maggiore"
+        elif kind == "tenor":
+            variation, register, texture, energy = "tenor", "tenor", "tenor", 0.45
+            wds = "cantabile"
+        elif kind == "agitato":
+            variation, texture, energy, wds = "octaves", busy, 0.8, "agitato"
+        elif kind in ("adagio", "lento"):
+            variation, energy = "ornament", 0.3
+            texture = "nocturne" if romantic else ("alberti" if tex != "alberti" else "repeated")
+            new_scale = 0.6
+            tempo_words = {"it": "Adagio" if not romantic else "Lento", "de": "Langsam",
+                           "fr": "Lent"}[lang]
+            wds = "espressivo"
+        elif kind == "finale":
+            if romantic:
+                role, variation, energy = "climax", "octaves", 0.95
+                texture = _tex(prof, "climax", rng, tx)
+                wds = "maestoso"
+            else:
+                variation, texture, energy = "figural", "block" if idiom == "classical" \
+                    else "walking", 0.8
+                new_scale = 1.25
+                tempo_words = {"it": "Allegro", "de": "Rasch", "fr": "Vif"}[lang]
+        if (kind, texture) in used and register != "tenor":
+            # a kind heard before comes back in another dress
+            fresh = [t for t in spare if (kind, t) not in used]
+            if fresh:
+                texture = rng.choice(fresh)
+        used.add((kind, texture))
+        if new_scale != scale and not tempo_words:
+            tempo_words = "Tempo I"
+        scale = new_scale
+        for j in range(2):
+            src = ph[j]
+            ph.append(_phr(name, role, src.kind, src.bars, vkey, src.cadence,
+                           energy + 0.05 * j, texture, recall=j, variation=variation,
+                           new_section=(j == 0), words=wds if j == 0 else "",
+                           register=register, tempo_scale=new_scale,
+                           tempo_words=tempo_words if j == 0 else ""))
+    # the coda: the finale's energy carried home, or — in a Romantic set —
+    # the theme remembered quietly
+    if romantic:
+        ph.append(_phr("Coda", "closing", "closing", 4 if not long_theme else 8, key, "plagal",
+                       0.25, _tex(prof, "closing", rng, tx), new_section=True,
+                       tempo_scale=1.0, tempo_words="Tempo I" if scale != 1.0 else ""))
+    else:
+        ph.append(_phr("Coda", "closing", "closing", 4 if not long_theme else 8, key, "PAC",
+                       0.85, ph[-1].texture, new_section=True, tempo_scale=scale))
+    return FormPlan("variations", ph)
+
+
+def parallel_key_of(key: Key) -> Key:
+    from .variation import parallel_key
+    return parallel_key(key)
+
+
 _TEMPLATES = {
     "continuation": _continuation,
     "concerto": _concerto,
     "prelude": _ternary, "nocturne": _ternary, "waltz": _waltz, "mazurka": _mazurka,
     "sonata": _sonata, "minuet": _minuet, "invention": _invention, "etude": _etude,
+    "variations": _variations,
 }

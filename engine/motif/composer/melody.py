@@ -1238,8 +1238,9 @@ def respell_line(notes: list[MelNote], harmony: list[Harmony], key: Key) -> None
         good = [p for p in options if before is None or p.step != before.step]
         if good:
             n.pitch = good[0]
-        elif options:
+        elif options and (n.pitch is None or before is None or n.pitch.step == before.step):
             n.pitch = options[0]
+        # otherwise the plain spelling stands: B flat, C, C sharp, D
 
 
 @dataclass

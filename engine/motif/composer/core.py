@@ -30,6 +30,7 @@ from .notation import (BarInfo, Mark, Note, Sheet, Voice, bar_length, beat_lengt
                        group_tuplets as _group_tuplets)
 from .profiles import Profile, choose_tempo, profile
 from .texture import TexNote, TextureContext, final_chord, realise
+from .variation import change_mode, figurate, to_tenor
 from . import arrange as _arrange
 
 
@@ -115,8 +116,26 @@ class Composer:
                 bpm = round(bpm * 0.6)
             self.tempo, self.tempo_text = bpm, words
         self._last_dyn: str | None = None
+        self._figures: set = set()               # figurations the variations have used
         #: a piece for a learner: plain rhythms, an easy left hand, no ornaments
         self.simple = "simplified" in (plan.notes or "")
+
+    def _fit_section_tempi(self, form: FormPlan) -> None:
+        """A section marked slower or quicker than the piece is taken at a
+        tempo that makes sense from where the piece starts: a slow variation
+        of a theme that is already slow only holds back a little, and a
+        quick one never runs away."""
+        base = float(self.tempo) * float(self.beat)          # quarter notes a minute
+        for p in form.phrases:
+            if p.tempo_scale < 1:
+                slow = max(base * p.tempo_scale, min(base * 0.85, 52.0))
+                p.tempo_scale = round(slow / base, 2)
+                if p.tempo_scale >= 0.8 and p.tempo_words:
+                    p.tempo_words = {"it": "Più lento", "de": "Langsamer",
+                                     "fr": "Plus lent"}.get(self.prof.language, "Più lento")
+            elif p.tempo_scale > 1:
+                quick = min(base * p.tempo_scale, max(base * 1.1, 152.0))
+                p.tempo_scale = round(quick / base, 2)
 
     def _say(self, stage: str, label: str, detail: str, fraction: float) -> None:
         report(self.progress, Progress(stage, label, detail, fraction))
@@ -134,7 +153,16 @@ class Composer:
         plan, prof = self.plan, self.prof
         self._say("planning", "Planning the form", "", 0.02)
         target = getattr(plan, "length_bars", 0) or plan.total_bars or 48
-        form = plan_form(self.genre, prof, self.key, target, self.rng, plan.character)
+        options: dict = {}
+        if self.family == "variations":
+            count, large = _variations_asked(plan.prompt or "")
+            if getattr(plan, "length_bars", 0):
+                large = target >= 96
+                count = count or max(2, round((target - 4) / (16 if large else 8)) - 1)
+            options = {"count": count or (4 if large else 5), "long_theme": large}
+        form = plan_form(self.genre, prof, self.key, target, self.rng, plan.character,
+                         **options)
+        self._fit_section_tempi(form)
         if self.simple:
             form = _simplify(form, prof)
         if self.ensemble != "solo_piano":
@@ -143,6 +171,8 @@ class Composer:
                 if p.register == "tenor" or p.texture == "tenor":
                     p.register = ""
                     p.texture = (prof.textures.get("contrast") or ["block"])[0]
+                if p.variation == "tenor":
+                    p.variation = ""
         hstyle = harmony_style(prof.harmony)
         mstyle = melody_style(prof.melody)
 
@@ -263,7 +293,8 @@ class Composer:
             sections.append({"name": ps.section, "role": ps.role, "start": start, "end": stop,
                              "key": str(ps.key), "texture": ps.texture, "energy": ps.energy,
                              "words": ps.words, "recall": ps.recall is not None,
-                             "variation": ps.variation, "forces": ps.forces})
+                             "variation": ps.variation, "forces": ps.forces,
+                             "tempo_words": ps.tempo_words, "register": ps.register})
         return {"genre": self.genre, "family": self.family, "bars": int(end / self.bar),
                 "key": str(self.key), "time": tuple(self.time), "tempo": self.tempo,
                 "tempo_text": self.tempo_text, "ensemble": self.ensemble,
@@ -417,7 +448,10 @@ class Composer:
             semis = (ps.key.tonic_pc - src.spec.key.tonic_pc) % 12
             if semis > 6:
                 semis -= 12
-        harmony = [Harmony(h.roman, ps.key, h.onset + shift, h.dur, pedal=(
+        mode_change = ps.variation in ("minore", "maggiore")
+        # a change of mode is made from the theme as it was, chord by chord
+        hkey = src.spec.key if mode_change else ps.key
+        harmony = [Harmony(h.roman, hkey, h.onset + shift, h.dur, pedal=(
             (h.pedal + semis) % 12 if h.pedal is not None else None), cadence=h.cadence)
             for h in src.harmony]
         if ps.cadence != src.spec.cadence and harmony:
@@ -452,10 +486,23 @@ class Composer:
         for m in melody:
             h = prev_h if (m.onset < t and prev_h is not None) else harmony_at(harmony, m.onset)
             m.pitch = spell(m.midi, h)
-        respell_line([m for m in melody if m.onset >= t], harmony, ps.key)
+        respell_line([m for m in melody if m.onset >= t], harmony, hkey)
+        if mode_change:
+            upbeat = [m for m in melody if m.onset < t]
+            harmony, moved = change_mode(harmony, [m for m in melody if m.onset >= t], hkey,
+                                         ps.key, self.beat)
+            melody = upbeat + moved
+        if ps.variation in ("figural", "figural3"):
+            melody = self._figural(melody, harmony, ps, t)
+        if ps.variation == "tenor" and self.ensemble == "solo_piano":
+            # the tune sings in the left hand, from its own downbeat
+            melody = to_tenor([m for m in melody if m.onset >= t])
         if ps.variation == "ornament":
-            melody = _ornament(melody, harmony, self.rng, self.prof.ornaments, self.beat,
-                               ps.key)
+            amount = self.prof.ornaments
+            if ps.tempo_scale < 1:
+                melody = self._adagio(melody, harmony, ps, t)
+                amount = max(0.3, amount)
+            melody = _ornament(melody, harmony, self.rng, amount, self.beat, ps.key)
         body = [m for m in melody if m.onset >= t]
         if ps.role == "climax" and body and self.ensemble == "solo_piano":
             # the climax sings its theme an octave higher, where it can
@@ -466,9 +513,49 @@ class Composer:
                     m.midi += 12
                     m.pitch = Pitch.build(m.pitch.step, m.pitch.alter, m.pitch.octave + 1) \
                         if m.pitch else m.pitch
-        if ps.role in ("return", "climax") and self.prof.harmony in ("romantic", "russian"):
+        if self.prof.harmony in ("romantic", "russian") and not mode_change and \
+                ps.role in ("return", "climax", "variation"):
             harmony = self._recolour(harmony, body, ps)
         return Written(ps, t, harmony, melody, [], upbeat=src.upbeat)
+
+    def _figural(self, melody: list[MelNote], harmony: list[Harmony], ps: PhraseSpec,
+                 t: F) -> list[MelNote]:
+        """The tune in running notes: sixteenths (eighths when the tempo is
+        quick, or in a compound metre), or triplets for a ``figural3``
+        variation; wider, arpeggiating figures for a Romantic."""
+        qbpm = float(self.tempo) * ps.tempo_scale * float(self.beat)
+        compound = self.beat == F(3, 2)
+        if ps.variation == "figural3":
+            unit = F(1, 4) if compound else F(1, 3)
+        else:
+            unit = F(1, 2) if compound or qbpm > 152 else F(1, 4)
+        if unit == F(1, 4) and qbpm > 152:
+            unit = F(1, 2)
+        body = [m for m in melody if m.onset >= t]
+        if not body:
+            return melody
+        mst = melody_style(self.prof.melody)
+        lo = min(m.midi for m in body) - 5
+        hi = min(mst.climax_high, max(m.midi for m in body) + 4)
+        leaps = 0.8 if self.prof.harmony in ("romantic", "russian", "film") else 0.45
+        if ps.role == "climax" or ps.tempo_scale > 1:
+            leaps = min(0.95, leaps + 0.3)       # a finale's figures leap and arpeggiate
+        return figurate(melody, harmony, ps.key, t, unit, self.beat, self.bar, lo, hi, leaps,
+                        avoid=self._figures)
+
+    def _adagio(self, melody: list[MelNote], harmony: list[Harmony], ps: PhraseSpec,
+                t: F) -> list[MelNote]:
+        """A slow variation sings the theme with its long notes held and their
+        last beat decorated on the way to the next — sixteenths at a slow
+        tempo — and grace notes and turns besides."""
+        body = [m for m in melody if m.onset >= t]
+        if not body or self.beat != 1:
+            return melody
+        mst = melody_style(self.prof.melody)
+        lo = min(m.midi for m in body) - 4
+        hi = min(mst.climax_high, max(m.midi for m in body) + 3)
+        return figurate(melody, harmony, ps.key, t, F(1, 4), self.beat, self.bar, lo, hi, 0.4,
+                        avoid=set(), adagio=True, rng=self.rng)
 
     def _recolour(self, harmony: list[Harmony], melody: list[MelNote], ps: PhraseSpec
                   ) -> list[Harmony]:
@@ -546,7 +633,8 @@ class Composer:
                 _melody_to_voice(tenor_lines, w.melody, "", w.harmony, w.start, None)
         ctx = TextureContext(self.time, self.bar, self.beat, self.key,
                              bass_low=prof.bass_low, rng=self.rng, tempo=float(self.tempo),
-                             virtuoso=_virtuoso(prof))
+                             virtuoso=_virtuoso(prof),
+                             grand=prof.harmony not in ("classical", "baroque"))
         ctx.melody_floor, ctx.melody_top = _rh_extent(rh, self.bar, end)
         if tenor_lines.notes:
             t_low, t_top = _rh_extent(tenor_lines, self.bar, end)
@@ -559,6 +647,7 @@ class Composer:
             ctx.key = ps.key
             ctx.energy = ps.energy
             ctx.melody = w.melody
+            ctx.tempo = float(self.tempo) * ps.tempo_scale
             span_end = w.start + self.bar * ps.bars
             last = wi == len(written) - 1
             tex = realise(ps.texture, w.harmony, w.start, final_bar if last else span_end, ctx)
@@ -579,7 +668,10 @@ class Composer:
         # -- dynamics, words, phrasing and pedalling
         for wi, w in enumerate(written):
             self._mark_phrase(rh, lh, w, first=(wi == 0))
-        self._tempo_changes(sheet, rh, written)
+        if self.family == "variations":
+            self._section_marks(sheet, rh, written)
+        else:
+            self._tempo_changes(sheet, rh, written)
         _final_marks(rh, lh, rh2, end, self.bar)
         sheet.bar_info.setdefault(bars, BarInfo()).barline = "final"
         sheet.voices = [rh, rh2, lh] + ([lh2] if lh2.notes else [])
@@ -608,9 +700,30 @@ class Composer:
                 if "fermata" not in n.marks:
                     n.marks = list(n.marks) + ["fermata"]
         lead.marks.append(Mark(end - self.bar * 2, "above", "rit."))
+        if self.family == "variations":
+            self._section_marks(sheet, lead, written)
         sheet.bar_info.setdefault(bars, BarInfo()).barline = "final"
         sheet.voices = voices
         return sheet
+
+    def _section_marks(self, sheet: Sheet, lead: Voice, written: list[Written]) -> None:
+        """A set of variations names each section at its head, closes each with
+        a double bar and gives it its own tempo where it has one."""
+        for wi, w in enumerate(written):
+            ps = w.spec
+            if not ps.new_section:
+                continue
+            bar_no = int(w.start / self.bar) + 1
+            info = sheet.bar_info.setdefault(bar_no, BarInfo())
+            info.mark = ps.section
+            if wi:
+                before = sheet.bar_info.setdefault(bar_no - 1, BarInfo())
+                before.barline = before.barline or "double"
+            if ps.tempo_words:
+                info.tempo = round(self.tempo * ps.tempo_scale)
+                info.tempo_text = ps.tempo_words
+                if wi and ps.tempo_scale < written[wi - 1].spec.tempo_scale:
+                    lead.marks.append(Mark(w.start - self.bar, "above", "rit."))
 
     def _key_changes(self, sheet: Sheet, written: list[Written]) -> None:
         prof = self.prof
@@ -621,7 +734,8 @@ class Composer:
                 continue
             bar_no = int(w.start / self.bar) + 1
             home = ps.key == self.key
-            modern = prof.harmony not in ("classical", "baroque") or ps.section in ("Trio",)
+            modern = prof.harmony not in ("classical", "baroque") or ps.section in ("Trio",) or \
+                ps.section.startswith("Var")
             if ps.key.fifths != sig.fifths and (ps.new_section or home) and \
                     (modern or sig.fifths != self.key.fifths):
                 sheet.bar_info.setdefault(bar_no, BarInfo()).key = ps.key
@@ -718,7 +832,7 @@ class Composer:
         quick = float(self.tempo) * float(self.beat) >= 108
         if classical and quick:
             for a, b, c in zip(mel, mel[1:], mel[2:]):
-                if b.dur <= self.beat and not (b.slur_start or b.slur_stop) and \
+                if self.beat / 2 <= b.dur <= self.beat and not (b.slur_start or b.slur_stop) and \
                         (abs(b.midi - a.midi) >= 3 or b.midi == a.midi) and \
                         abs(c.midi - b.midi) >= 3 and "stacc" not in b.marks:
                     b.marks = list(b.marks) + ["stacc"]
@@ -817,11 +931,34 @@ def prof_pedal(prof: Profile) -> bool:
     return prof.harmony in ("russian", "romantic", "impressionist")
 
 
+_COUNTS = {"two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
+           "nine": 9, "ten": 10, "eleven": 11, "twelve": 12}
+
+
+def _variations_asked(prompt: str) -> tuple[int, bool]:
+    """What a request for variations asks: how many (0 when it doesn't say;
+    three for a short set) and whether the set is a large one, on a
+    sixteen-bar theme."""
+    import re
+    text = prompt.lower()
+    large = any(w in text for w in ("long", "extended", "full", "complete", "grand", "large",
+                                    "substantial", "big"))
+    m = re.search(r"\b(\d{1,2}|" + "|".join(_COUNTS) + r")\s+variations?\b", text)
+    if m:
+        n = int(m.group(1)) if m.group(1).isdigit() else _COUNTS[m.group(1)]
+        return max(2, min(12, n)), large
+    if any(w in text for w in ("short", "brief", "little", "small", "simple", "easy",
+                               "quick")):
+        return 3, False
+    return 0, large
+
+
 def _label(ps: PhraseSpec) -> str:
     return {"theme": "Writing the theme", "contrast": "Writing the middle section",
             "climax": "Building the climax", "return": "Bringing the theme back",
             "closing": "Writing the coda", "transition": "Leading back",
-            "development": "Developing the material", "intro": "Setting the scene"
+            "development": "Developing the material", "intro": "Setting the scene",
+            "variation": f"Writing {ps.section}"
             }.get(ps.role, "Writing")
 
 

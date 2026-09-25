@@ -58,6 +58,7 @@ class TextureContext:
     tempo: float = 90.0            # beats per minute, so figuration suits the speed
     melody: list = field(default_factory=list)   # the phrase's tune, for textures that imitate it
     virtuoso: bool = False         # a composer whose runs stay fast at any tempo
+    grand: bool = True             # a Romantic sound: the left hand may toll like bells
 
 
 def bass_note(h: Harmony, ctx: TextureContext, octave_down: bool = False) -> int:
@@ -162,6 +163,9 @@ def inner_chord(h: Harmony, t0: F, dur: F, ctx: TextureContext, n: int = 2) -> l
     low = _melody_low(ctx, t0, t0 + dur)
     if top is None or low is None:
         return []
+    running = sum(1 for n in ctx.melody if t0 <= n.onset < t0 + dur)
+    if running > 2 * float(dur / ctx.beat):
+        return []                  # a hand running in quick notes holds nothing under them
     hi = low - 3
     lo = max(top - 13, 52)
     if hi - lo < 3:
@@ -260,7 +264,7 @@ def block(h: Harmony, t0: F, dur: F, ctx: TextureContext, rh_inner: bool = True
     """A chorale: the bass (in octaves when the music is strong) with the
     chord above it, and the chord's upper notes held in the right hand under
     the melody where the hand can reach them."""
-    if ctx.energy > 0.8 and dur >= 2 * ctx.beat:
+    if ctx.energy > 0.8 and dur >= 2 * ctx.beat and ctx.grand:
         # at full strength the left hand tolls and answers, as in the bells
         return bells(h, t0, dur, ctx)
     out: list[TexNote] = []

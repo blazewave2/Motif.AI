@@ -297,3 +297,73 @@ def test_asking_for_another_mood_rewrites_the_same_piece_in_it():
     assert after.measure_count == before.measure_count
     assert after.metadata.get("style") == before.metadata.get("style")
     assert "minor" in out.message
+
+
+def test_a_theme_and_variations_keeps_the_theme_and_varies_its_dress():
+    c, score = _compose("Variations on a theme in the style of Mozart in A major", seed=1)
+    assert _errors(c.msn) == []
+    assert c.family == "variations"
+    names = [s["name"] for s in c.summary["sections"]]
+    assert names[0] == "Tema" and names[-1] == "Coda"
+    assert [n for n in names if n.startswith("Var.")] == \
+        ["Var. I", "Var. II", "Var. III", "Var. IV", "Var. V"]
+    assert 'mark="Var. I"' in c.msn and 'mark="Tema"' in c.msn
+    # the minore changes key, the slow variation and the finale change tempo
+    keys = {s["name"]: s["key"] for s in c.summary["sections"]}
+    assert keys["Var. III"] == "A minor" and keys["Tema"] == "A major"
+    assert '"Adagio"' in c.msn and '"Allegro"' in c.msn
+    # every variation is as long as the theme
+    bars = {s["name"]: s["end"] - s["start"] + 1 for s in c.summary["sections"]}
+    assert all(bars[n] == bars["Tema"] for n in names if n.startswith("Var."))
+
+
+def test_figuration_decorates_each_note_with_chord_tones_on_the_beats():
+    from motif.composer.harmony import Harmony
+    from motif.composer.melody import MelNote
+    from motif.composer.variation import figurate
+    key = Key.parse("C major")
+    harmony = [Harmony("I", key, F(0), F(4)), Harmony("V7", key, F(4), F(4)),
+               Harmony("I", key, F(8), F(4))]
+    tune = [MelNote(F(0), F(1), 64), MelNote(F(1), F(1), 67), MelNote(F(2), F(2), 72),
+            MelNote(F(4), F(2), 71), MelNote(F(6), F(2), 67), MelNote(F(8), F(4), 72)]
+    out = figurate(tune, harmony, key, F(0), F(1, 4), F(1), F(4), 55, 84)
+    assert sum(n.dur for n in out) == sum(n.dur for n in tune)
+    assert len(out) > 2 * len(tune)
+    for n in tune[:-1]:
+        # each figure starts on the theme's own note
+        assert any(o.onset == n.onset and o.midi == n.midi for o in out)
+    for i, n in enumerate(out):
+        h = next(h for h in harmony if h.onset <= n.onset < h.end)
+        if n.onset % 1 == 0:
+            assert n.midi % 12 in h.pcs, (n.onset, n.midi)
+        elif n.midi % 12 not in h.pcs and 0 < i < len(out) - 1:
+            # a note outside the chord moves in and out by step
+            assert abs(n.midi - out[i - 1].midi) <= 2 and abs(out[i + 1].midi - n.midi) <= 2
+
+
+def test_the_minore_maps_every_chord_degree_for_degree():
+    from motif.composer.variation import mode_roman, parallel_key
+    assert [mode_roman(r, True) for r in ("I", "ii65", "IV", "V7", "vi", "V/vi", "I6")] == \
+        ["i", "ii%65", "iv", "V7", "VI", "V/VI", "i6"]
+    assert [mode_roman(r, False) for r in ("i", "iio6", "III", "iv", "VI")] == \
+        ["I", "ii6", "iii", "IV", "vi"]
+    # a parallel key with a real key signature
+    assert str(parallel_key(Key.parse("D flat major"))) == "C# minor"
+    assert str(parallel_key(Key.parse("G sharp minor"))) == "Ab major"
+
+
+def test_a_requested_number_of_variations_is_written():
+    c, _ = _compose("A theme with 8 variations in the style of Beethoven", seed=2)
+    assert _errors(c.msn) == []
+    assert sum(1 for s in c.summary["sections"] if s["name"].startswith("Var.")) == 8
+    short, _ = _compose("Short variations in G major", seed=2)
+    assert sum(1 for s in short.summary["sections"] if s["name"].startswith("Var.")) == 3
+
+
+def test_variations_are_recognised_and_concertos_only_when_asked():
+    assert genre_family(detect_genre("Variations on a folk song")) == "variations"
+    assert genre_family("theme_and_variations") == "variations"
+    for seed in range(1, 30):
+        plan = parse_prompt("A Rachmaninoff piece", seed=seed)
+        assert plan.form != "concerto" and plan.ensemble == "solo_piano"
+    assert parse_prompt("A Rachmaninoff concerto", seed=1).ensemble == "piano_concerto"

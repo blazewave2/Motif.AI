@@ -45,6 +45,7 @@ Anything you would ask a composer sitting next to you:
 - *"Compose a romantic piano piece in the style of Chopin"*
 - *"Write a short film score for a mysterious forest scene"*
 - *"A Bach fugue in D minor at 92 bpm"*
+- *"Six variations on a theme in the style of Mozart"*
 - *"Make it darker and slower"* — writes the same piece again in that mood
 - *"Continue this piece in a more dramatic way"* — it reads your open score
 - *"Continue in the same style"* — matches the composer, key, tempo and
@@ -79,10 +80,11 @@ note ([how it works](docs/COMPOSER.md)):
 
 | | |
 |---|---|
-| **A form, not a stream** | Every piece is laid out before a note is written: an opening, a theme group, a middle section in a related key with its own theme, a passage leading home, the return — at its climax, or ornamented — and a coda. Sonatas, waltzes, mazurkas, minuets and inventions have their own architectures. |
+| **A form, not a stream** | Every piece is laid out before a note is written: an opening, a theme group, a middle section in a related key with its own theme, a passage leading home, the return — at its climax, or ornamented — and a coda. Sonatas, waltzes, mazurkas, minuets, inventions, concertos and sets of variations have their own architectures. |
 | **Themes with a shape** | A theme starts as a two-bar idea chosen from many candidates for its character and for the harmony it implies. Phrases state it, answer it at another level, take it in sequence and break it into fragments on the way to the cadence — so the music is always about something. |
 | **Harmony in the composer's own language** | Chords are planned by function — tonic, answer, predominant, cadence — and drawn from each composer's vocabulary: Mozart's cadential six-fours and augmented sixths, Chopin's Neapolitans and applied diminished sevenths, Rachmaninoff's added-sixth minor chords, half-diminished supertonics, line clichés and pedal points, Debussy's planing. Where the tune needs it, the chords under it are recoloured. |
 | **Melody searched note by note** | Every note is chosen by a search that weighs chord tones and resolutions, leaps and their recovery, one planned climax per phrase, the idea's own contour, the cadence — and what real melodies do, learned from 1,469 public-domain scores. Several versions of every phrase are written and the best kept. |
+| **Variations that vary** | A theme and variations keeps the theme's phrases and chords and gives it a new dress each time: running figuration found note by note, flowing triplets, a running accompaniment, the minore, the tune in the left hand, a slow ornamented variation, a finale and a coda — each named, with its own tempo. |
 | **Written for the hands** | The accompaniment is laid out in the idiom of the passage — the nocturne left hand, Rachmaninoff's tolling bells, sweeping arpeggios, the waltz bass, the Alberti bass, a walking bass, a two-part invention — with every chord inside one hand's reach and under the melody. |
 | **Played, not printed** | Dynamics follow the energy of each phrase, hairpins swell into its high point, slurs follow its breathing, the pedal changes with the harmony; the music holds back before new sections, broadens into the climax, moves on in the middle (*Più mosso*) and returns (*Tempo I*); returns are ornamented; the last chord is held. |
 

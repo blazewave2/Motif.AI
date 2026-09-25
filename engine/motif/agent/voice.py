@@ -103,10 +103,28 @@ _TEXTURE_WORDS = {
     "sustained": ["open, pedalled harmonies", "still, open sonorities"],
 }
 _GENRE_NAMES = {"etude-tableau": "étude-tableau", "etude": "étude", "elegie": "élégie",
-                "gymnopedie": "gymnopédie", "lyric piece": "lyric piece"}
+                "gymnopedie": "gymnopédie", "lyric piece": "lyric piece",
+                "variations": "theme and variations", "variation": "theme and variations",
+                "theme_and_variations": "theme and variations"}
 
 
-def _texture_phrase(tex: str, rng: random.Random) -> str:
+#: How the accompaniment sounds when no piano plays it: the inner parts and
+#: the bass of a quartet or an orchestra.
+_ENSEMBLE_TEXTURE_WORDS = {
+    "block": ["sustained harmony in the lower parts", "full chords in the lower parts"],
+    "repeated": ["pulsing repeated chords", "throbbing inner parts"],
+    "walking": ["a walking bass", "a bass line that walks"],
+    "bells": ["tolling octaves in the bass", "deep, tolling basses"],
+    "waltz": ["a waltz accompaniment", "the lilt of a waltz"],
+    "sustained": ["long-held harmonies", "still, sustained harmonies"],
+}
+_PIANO_LESS = ("string_quartet", "string_orchestra", "orchestra", "chamber")
+
+
+def _texture_phrase(tex: str, rng: random.Random, ensemble: str = "") -> str:
+    if ensemble in _PIANO_LESS:
+        return rng.choice(_ENSEMBLE_TEXTURE_WORDS.get(
+            tex, ["flowing inner parts", "inner parts in gentle motion"]))
     return rng.choice(_TEXTURE_WORDS.get(tex, ["a flowing accompaniment"]))
 
 
@@ -143,6 +161,14 @@ def composed_message(plan: CompositionPlan, summary: dict,
     ])
     lines = [opener]
     secs = summary.get("sections", [])
+    if summary.get("family") == "variations":
+        story = _variations_story(secs, summary, key, rng)
+        if story:
+            lines.append("\n\n" + " ".join(story))
+        if plan.character:
+            lines.append(f"\n\nI aimed for something {plan.character}.")
+        plain = "".join(lines)
+        return _try_rewrite(voice, plain, {"kind": "create", "plan": plan, "summary": summary})
     story = []
     th = summary.get("theme", {})
     shape = th.get("shape", 0)
@@ -153,7 +179,7 @@ def composed_message(plan: CompositionPlan, summary: dict,
         if sec["texture"] in described:
             tex = rng.choice(["the same accompaniment", "the accompaniment heard before"])
         else:
-            tex = _texture_phrase(sec["texture"], rng)
+            tex = _texture_phrase(sec["texture"], rng, summary.get("ensemble", ""))
             described.add(sec["texture"])
         forces = sec.get("forces", "")
         if role == "intro" and forces == "solo":
@@ -223,6 +249,68 @@ def composed_message(plan: CompositionPlan, summary: dict,
                                  f"\n\nThe character throughout is {plan.character}."]))
     plain = "".join(lines)
     return _try_rewrite(voice, plain, {"kind": "create", "plan": plan, "summary": summary})
+
+
+def _variations_story(secs: list[dict], summary: dict, key: str,
+                      rng: random.Random) -> list[str]:
+    """A set of variations told section by section: what the theme is and
+    what each variation does to it."""
+    th = summary.get("theme", {})
+    shape = th.get("shape", 0)
+    shape_word = "rising" if shape > 0 else "falling" if shape < 0 else "arching"
+    out: list[str] = []
+    described: set[str] = set()
+
+    def dress(tex: str) -> str:
+        if tex in described:
+            return rng.choice(["the accompaniment heard before", "the same accompaniment"])
+        described.add(tex)
+        return _texture_phrase(tex, rng, summary.get("ensemble", ""))
+
+    for sec in secs:
+        role, a, b, name = sec["role"], sec["start"], sec["end"], sec["name"]
+        var, tex = sec.get("variation", ""), sec["texture"]
+        tempo = sec.get("tempo_words", "")
+        where = f" ({_bars(a, b)})"
+        article = "an" if tempo[:1].lower() in "aeiou" else "a"
+        if role == "theme":
+            out.append(f"The theme{where} is a simple {shape_word} tune in two phrases — one "
+                       f"that pauses on the dominant and one that answers it and closes — "
+                       f"over {dress(tex)}.")
+            continue
+        if role == "closing":
+            quiet = sec.get("energy", 0.5) < 0.5
+            out.append(f"A coda{where} " + ("remembers the theme quietly and settles."
+                                            if quiet else "brings the set to a brilliant close."))
+            continue
+        if var == "figural" and tempo and tempo != "Tempo I":
+            what = f"— {tempo} — breaks every note of the tune into running arpeggios"
+        elif var == "figural":
+            what = "decorates every note of the tune in running figuration"
+        elif var == "figural3":
+            what = "carries the tune in flowing triplets"
+        elif var == "minore":
+            what = f"turns to {sec['key']} — the minore"
+        elif var == "maggiore":
+            what = f"turns to {sec['key']} — the maggiore"
+        elif var == "tenor" or sec.get("register") == "tenor":
+            what = "gives the tune to the left hand, cantabile, under soft repeated chords"
+        elif var == "ornament" and tempo in ("Più lento", "Langsamer", "Plus lent"):
+            what = f"holds back ({tempo}), lingering on the tune's long notes and " \
+                   f"decorating them"
+        elif var == "ornament" and tempo and tempo != "Tempo I":
+            what = f"slows to {article} {tempo}, holding the tune's long notes and " \
+                   f"decorating them"
+        elif var == "ornament":
+            what = f"ornaments the tune over {dress(tex)}"
+        elif var == "octaves" and role == "climax":
+            what = "brings the theme back in full chords and octaves at its grandest"
+        elif var == "octaves":
+            what = f"doubles the tune in octaves over {dress(tex)}"
+        else:
+            what = f"keeps the tune and sets it over {dress(tex)}"
+        out.append(f"{name}{where} {what}.")
+    return out
 
 
 def continued_message(plan: CompositionPlan, existing_title: str, bars: int,
