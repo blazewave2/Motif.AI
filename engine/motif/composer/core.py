@@ -28,7 +28,7 @@ from .melody import (MelNote, Motif, MelodyWriter, PhrasePlan, _random_motif, im
                      invent_motif, melody_style, motif_score, respell_line, roles_for)
 from .notation import (BarInfo, Mark, Note, Sheet, Voice, bar_length, beat_length,
                        group_tuplets as _group_tuplets)
-from .profiles import Profile, choose_tempo, profile
+from .profiles import Profile, choose_tempo, named_composer, profile
 from .texture import TexNote, TextureContext, final_chord, realise
 from .variation import change_mode, figurate, to_tenor
 from . import arrange as _arrange
@@ -87,6 +87,14 @@ class Composer:
         self.progress = progress
         self.rng = random.Random(plan.seed if seed is None else seed)
         self.prof: Profile = profile(plan.style)
+        self.display = self.prof.display
+        named = named_composer(plan.prompt or "")
+        if named is not None and named[0] != self.prof.name and \
+                plan.style.lower() not in (plan.prompt or "").lower():
+            # a composer without a profile of their own writes through their kin
+            self.prof, self.display = profile(named[0]), named[1]
+        elif named is not None and named[0] == self.prof.name:
+            self.display = named[1]
         self.key = Key.parse(plan.key)
         self.genre = form or detect_genre(plan.prompt) or plan.form
         if genre_family(self.genre) == "concerto" and \
@@ -97,7 +105,7 @@ class Composer:
         if getattr(plan, "time_given", False) or not plan.prompt:
             self.time = tuple(plan.time)
         else:
-            self.time = choose_metre(self.family, self.prof, self.rng)
+            self.time = choose_metre(self.family, self.prof, self.rng, self.genre)
         self.bar = bar_length(self.time)
         self.beat = beat_length(self.time)
         self.notes: list[str] = []
@@ -109,7 +117,8 @@ class Composer:
         if getattr(plan, "tempo_given", False):
             self.tempo, self.tempo_text = plan.tempo, plan.tempo_text
         else:
-            words, bpm = choose_tempo(self.prof, self.family, plan.character, self.rng)
+            words, bpm = choose_tempo(self.prof, self.family, plan.character, self.rng,
+                                      self.genre)
             if self.beat == F(3, 2):
                 bpm = round(bpm * 0.72)
             elif self.beat == F(2):
@@ -303,7 +312,7 @@ class Composer:
         return {"genre": self.genre, "family": self.family, "bars": int(end / self.bar),
                 "key": str(self.key), "time": tuple(self.time), "tempo": self.tempo,
                 "tempo_text": self.tempo_text, "ensemble": self.ensemble,
-                "style": self.prof.display, "composer": self.prof.name,
+                "style": self.display, "composer": self.prof.name,
                 "sections": sections,
                 "theme": {"notes": len(motif.rhythm) + len(motif.second),
                           "shape": sum(motif.steps), "upbeat": bool(motif.anacrusis),
@@ -1391,11 +1400,18 @@ _GENRE_TITLES = {
     "mazurka": "Mazurka", "etude": "Étude", "étude": "Étude", "study": "Study",
     "sonata": "Sonata", "invention": "Invention", "fugue": "Fugue", "ballade": "Ballade",
     "rhapsody": "Rhapsody", "scherzo": "Scherzo", "intermezzo": "Intermezzo",
-    "impromptu": "Impromptu", "concerto": "Concerto",
+    "impromptu": "Impromptu", "concerto": "Concerto", "rondo": "Rondo", "rondeau": "Rondeau",
+    "variations": "Variations", "theme and variations": "Theme and Variations",
+    "march": "March", "marche": "Marche", "tarantella": "Tarantella",
+    "siciliano": "Siciliano", "siciliana": "Siciliana", "lullaby": "Lullaby", "hymn": "Hymn",
+    "humoresque": "Humoresque", "fairy tale": "Fairy Tale", "skazka": "Skazka",
+    "bagatelle": "Bagatelle", "novelette": "Novelette", "nocturno": "Notturno",
+    "caprice": "Caprice", "capriccio": "Capriccio", "serenade": "Serenade",
+    "idyll": "Idyll", "album leaf": "Albumblatt", "albumblatt": "Albumblatt",
 }
 _FORMAL = ("Concerto", "Sonata", "Fugue", "Invention", "Waltz", "Nocturne", "Prelude",
            "Étude", "Rondo", "Mazurka", "Scherzo", "Ballade", "Rhapsody", "Intermezzo",
-           "Impromptu", "Variations")
+           "Impromptu", "Variations", "Theme and Variations")
 
 
 def _retitle(plan: CompositionPlan, genre: str, named: bool = False) -> None:

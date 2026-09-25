@@ -105,7 +105,12 @@ _TEXTURE_WORDS = {
 _GENRE_NAMES = {"etude-tableau": "étude-tableau", "etude": "étude", "elegie": "élégie",
                 "gymnopedie": "gymnopédie", "lyric piece": "lyric piece",
                 "variations": "theme and variations", "variation": "theme and variations",
-                "theme_and_variations": "theme and variations"}
+                "theme_and_variations": "theme and variations",
+                # a form's technical name is not what anyone calls a piece
+                "ternary": "piece", "period": "piece", "binary": "piece",
+                "rounded_binary": "piece", "through_composed": "piece",
+                "ostinato_form": "piece", "sonata_binary": "piece", "chorale": "chorale",
+                "song_without_words": "song without words", "lyric_piece": "lyric piece"}
 
 
 #: How the accompaniment sounds when no piano plays it: the inner parts and

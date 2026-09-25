@@ -243,6 +243,55 @@ def waltz(h: Harmony, t0: F, dur: F, ctx: TextureContext) -> list[TexNote]:
     return out
 
 
+def march(h: Harmony, t0: F, dur: F, ctx: TextureContext) -> list[TexNote]:
+    """The march bass: the bass on the strong beats (root, then the fifth
+    below), the chord on the weak ones, short and firm."""
+    out: list[TexNote] = []
+    b = bass_note(h, ctx)
+    ctx.prev_bass = b
+    fifth = next((m for m in range(b - 7, b - 3) if m % 12 == (h.root_pc + 7) % 12
+                  and m >= 28), b)
+    top = _below_melody(ctx, t0, ctx.mid_high)
+    v = voicing(h, ctx, 3, max(b + 7, ctx.mid_low), top, ctx.prev_voicing, max_span=9)
+    ctx.prev_voicing = v or ctx.prev_voicing
+    t, k = t0, 0
+    while t < t0 + dur:
+        d = min(ctx.beat, t0 + dur - t)
+        pos = (t % ctx.bar_len) / ctx.beat
+        if pos % 2 == 0:
+            out.append(TexNote(t, d, [b if (pos == 0 or k % 2 == 0) else fifth]))
+            k += 1
+        elif v:
+            out.append(TexNote(t, d, list(v), marks=["stacc"] if ctx.energy > 0.5 else []))
+        t += ctx.beat
+    return out
+
+
+def polonaise(h: Harmony, t0: F, dur: F, ctx: TextureContext) -> list[TexNote]:
+    """The polonaise rhythm in the left hand — an eighth, two sixteenths,
+    then four eighths — the bass on the downbeat and the chord after it."""
+    out: list[TexNote] = []
+    b = bass_note(h, ctx)
+    ctx.prev_bass = b
+    top = _below_melody(ctx, t0, ctx.mid_high)
+    v = voicing(h, ctx, 3, max(b + 7, ctx.mid_low - 2), top, ctx.prev_voicing, max_span=9)
+    ctx.prev_voicing = v or ctx.prev_voicing
+    if ctx.time != (3, 4) or not v:
+        return block(h, t0, dur, ctx)
+    rhythm = [F(1, 2), F(1, 4), F(1, 4), F(1, 2), F(1, 2), F(1, 2), F(1, 2)]
+    t = t0
+    while t < t0 + dur:
+        on = t
+        for i, d in enumerate(rhythm):
+            if on >= t0 + dur:
+                break
+            notes = [b - 12 if b - 12 >= 28 else b, b] if i == 0 else list(v)
+            out.append(TexNote(on, min(d, t0 + dur - on), notes))
+            on += d
+        t += ctx.bar_len
+    return out
+
+
 def alberti(h: Harmony, t0: F, dur: F, ctx: TextureContext) -> list[TexNote]:
     """Low, high, middle, high: Mozart's broken chord in the tenor."""
     out: list[TexNote] = []
@@ -493,7 +542,8 @@ REALISERS = {
     "nocturne": nocturne, "waltz": waltz, "alberti": alberti, "block": block,
     "bells": bells, "sweep": lambda h, t, d, c: sweep(h, t, d, c, True),
     "sweep16": lambda h, t, d, c: sweep(h, t, d, c, False), "repeated": repeated,
-    "sustained": sustained, "final": final_chord, "tenor": tenor,
+    "sustained": sustained, "final": final_chord, "tenor": tenor, "march": march,
+    "polonaise": polonaise,
 }
 
 

@@ -80,6 +80,7 @@ def plan_form(genre: str, prof: Profile, key: Key, target_bars: int,
     fn = _TEMPLATES.get(_genre_family(genre), _ternary)
     plan = fn(prof, key, max(8, target_bars), rng, character, **options)
     plan.genre = genre or plan.genre
+    _dress_for_genre(plan, genre, prof)
     if "fugue" in genre or "fugato" in genre:
         # a fugue answers its subject at the fifth, in the dominant
         for p in plan.phrases:
@@ -87,6 +88,34 @@ def plan_form(genre: str, prof: Profile, key: Key, target_bars: int,
                 p.texture = "fugato"
     _add_intro(plan, prof, target_bars, rng)
     return plan
+
+
+#: Accompaniments a named kind of piece has, by role (the rest as the
+#: composer's own): the polonaise rhythm, the march bass, a toccata's
+#: unbroken figuration.
+_GENRE_TEXTURES = {
+    "polonaise": {"theme": "polonaise", "return": "polonaise", "climax": "polonaise",
+                  "closing": "polonaise"},
+    "march": {"theme": "march", "return": "march", "contrast": "march", "closing": "march"},
+    "marche": {"theme": "march", "return": "march", "contrast": "march", "closing": "march"},
+    "sarabande": {"theme": "block", "return": "block"},
+    "hymn": {"theme": "block", "return": "block", "contrast": "block", "closing": "block"},
+    "scherzo": {"theme": "waltz", "return": "waltz"},
+    "gavotte": {"theme": "block", "return": "block"},
+}
+
+
+def _dress_for_genre(plan: FormPlan, genre: str, prof: Profile) -> None:
+    for name, by_role in _GENRE_TEXTURES.items():
+        if name in genre:
+            for p in plan.phrases:
+                if p.role in by_role and p.kind != "intro":
+                    p.texture = by_role[p.role]
+            break
+    if "toccata" in genre:
+        for p in plan.phrases:
+            if p.role != "intro":
+                p.texture = "walking" if prof.harmony == "baroque" else "sweep16"
 
 
 #: Textures that can set the scene on their own before the tune comes in.
@@ -125,6 +154,9 @@ GENRE_WORDS = (
     "toccata", "etude", "étude", "study", "romance", "elegie", "élégie", "elegy", "berceuse",
     "barcarolle", "reverie", "rêverie", "intermezzo", "impromptu", "ballade", "rhapsody",
     "fantasy", "fantasia", "scherzo", "arabesque", "lied", "song",
+    "march", "marche", "tarantella", "siciliano", "siciliana", "lullaby", "hymn",
+    "humoresque", "fairy tale", "skazka", "bagatelle", "novelette", "caprice", "capriccio",
+    "serenade", "idyll", "album leaf", "albumblatt",
 )
 
 
@@ -149,7 +181,29 @@ _METRES = {
 }
 
 
-def choose_metre(family: str, prof: Profile, rng: random.Random) -> tuple[int, int]:
+#: Pieces whose name fixes their metre, whatever family they belong to.
+_GENRE_METRES = {
+    "gigue": [((6, 8), 3), ((12, 8), 2)], "barcarolle": [((6, 8), 2), ((12, 8), 3)],
+    "berceuse": [((6, 8), 1)], "lullaby": [((6, 8), 2), ((3, 4), 1)],
+    "siciliano": [((6, 8), 2), ((12, 8), 1)], "siciliana": [((6, 8), 2), ((12, 8), 1)],
+    "sarabande": [((3, 4), 1)], "gavotte": [((4, 4), 1)], "polonaise": [((3, 4), 1)],
+    "scherzo": [((3, 4), 1)], "march": [((4, 4), 2), ((2, 4), 1)],
+    "marche": [((4, 4), 2), ((2, 4), 1)], "tarantella": [((6, 8), 1)],
+    "toccata": [((4, 4), 2), ((2, 4), 1)], "hymn": [((4, 4), 2), ((3, 4), 1)],
+}
+
+
+def genre_metres(genre: str) -> list | None:
+    g = (genre or "").lower()
+    return next((v for k, v in _GENRE_METRES.items() if k in g), None)
+
+
+def choose_metre(family: str, prof: Profile, rng: random.Random, genre: str = ""
+                 ) -> tuple[int, int]:
+    named = genre_metres(genre)
+    if named:
+        metres, weights = zip(*named)
+        return rng.choices(metres, weights)[0]
     if prof.name == "satie":
         return (3, 4)
     opts = _METRES.get(family, _METRES["prelude"])
@@ -168,14 +222,18 @@ def _genre_family(genre: str) -> str:
         ("waltz", ("waltz", "valse", "ländler")),
         ("mazurka", ("mazurka", "polonaise")),
         ("sonata", ("sonata", "sonatina", "first movement")),
-        ("minuet", ("minuet", "menuet", "gavotte", "bourrée", "sarabande", "gigue")),
-        ("invention", ("invention", "fugue", "toccata", "partita", "sinfonia")),
-        ("etude", ("etude", "étude", "study", "toccata", "etude-tableau")),
+        ("minuet", ("minuet", "menuet", "gavotte", "bourrée", "sarabande", "gigue", "march",
+                    "marche")),
+        ("invention", ("invention", "fugue", "partita", "sinfonia")),
+        ("etude", ("etude", "étude", "study", "toccata", "etude-tableau", "tarantella")),
         ("nocturne", ("nocturne", "romance", "song", "elegie", "élégie", "elegy", "lied",
                       "berceuse", "barcarolle", "reverie", "rêverie", "consolation",
-                      "liebestraum", "lyric", "intermezzo", "impromptu", "moment")),
+                      "liebestraum", "lyric", "intermezzo", "impromptu", "moment",
+                      "siciliano", "siciliana", "lullaby", "hymn", "serenade", "idyll",
+                      "album leaf", "albumblatt")),
         ("prelude", ("prelude", "prélude", "ballade", "rhapsody", "fantasy", "fantasia",
-                     "scherzo", "piece", "")),
+                     "scherzo", "piece", "humoresque", "fairy tale", "skazka", "bagatelle",
+                     "novelette", "caprice", "capriccio", "")),
     ):
         if any(w and w in genre for w in words):
             return fam

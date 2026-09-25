@@ -378,3 +378,27 @@ def test_a_rondo_returns_to_its_refrain_between_two_episodes():
     keys = {s["name"]: s["key"] for s in c.summary["sections"]}
     assert keys["A"] == keys["A'"] == keys["A''"] == "D major"
     assert keys["B"] != keys["A"] and keys["C"] not in (keys["A"], keys["B"])
+
+
+def test_any_composer_writes_through_their_nearest_kin_and_keeps_their_name():
+    from motif.composer.profiles import named_composer
+    assert named_composer("A piece in the style of Prokofiev") == ("rachmaninoff", "Prokofiev")
+    assert named_composer("a Fauré barcarolle") == ("romantic", "Fauré")
+    assert named_composer("A nocturne in the style of Field") == ("chopin", "Field")
+    # names that are also ordinary words need saying as names
+    assert named_composer("A four-part chorale about a field of glass") is None
+    c, _ = _compose("A Medtner fairy tale in F minor")
+    assert c.prof.name == "rachmaninoff" and c.summary["style"] == "Medtner"
+    assert c.genre == "fairy tale" and c.plan.title.startswith("Fairy Tale")
+
+
+@pytest.mark.parametrize("prompt,metre", [
+    ("A Bach gigue in G major", {(6, 8), (12, 8)}),
+    ("A Chopin barcarolle", {(6, 8), (12, 8)}),
+    ("A Chopin polonaise in A flat major", {(3, 4)}),
+    ("A march in the style of Schubert", {(4, 4), (2, 4)}),
+])
+def test_named_dances_and_pieces_keep_their_metre(prompt, metre):
+    c, _ = _compose(prompt)
+    assert _errors(c.msn) == []
+    assert tuple(c.time) in metre

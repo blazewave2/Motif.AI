@@ -218,7 +218,77 @@ KIN = {
     "prokofiev": "rachmaninoff", "shostakovich": "rachmaninoff", "scriabine": "scriabin",
     "poulenc": "ravel", "chaminade": "romantic", "clara schumann": "schumann",
     "hensel": "mendelssohn", "fanny mendelssohn": "mendelssohn",
+    "bartók": "liszt", "bartok": "liszt", "stravinsky": "ravel", "puccini": "romantic",
+    "verdi": "romantic", "bellini": "chopin", "donizetti": "chopin", "rossini": "mozart",
+    "bizet": "romantic", "massenet": "romantic", "gounod": "romantic", "bruckner": "brahms",
+    "reger": "brahms", "nielsen": "brahms", "grainger": "grieg", "sinding": "grieg",
+    "albinoni": "handel", "boccherini": "haydn", "gluck": "mozart", "salieri": "mozart",
+    "weber": "schubert", "spohr": "mendelssohn", "hahn": "romantic", "boulanger": "debussy",
+    "messiaen": "scriabin", "copland": "film", "barber": "romantic", "bernstein": "film",
+    "max richter": "einaudi", "richter": "einaudi", "arnalds": "einaudi", "nyman": "einaudi",
+    "sakamoto": "einaudi", "tiersen": "einaudi", "howard shore": "film", "horner": "film",
+    "desplat": "film", "kapustin": "film", "mompou": "debussy", "satie": "satie",
+    "lyadov": "tchaikovsky", "liadov": "tchaikovsky", "rubinstein": "tchaikovsky",
+    "balakirev": "tchaikovsky", "rachmaninoff": "rachmaninoff", "schumann": "schumann",
+    "arvo pärt": "einaudi", "arvo part": "einaudi", "philip glass": "einaudi",
+    "john williams": "film", "hans zimmer": "film", "joe hisaishi": "film",
 }
+
+#: How a composer's name is written, where it is not simply capitalised.
+_DISPLAY = {
+    "fauré": "Fauré", "faure": "Fauré", "dvořák": "Dvořák", "dvorak": "Dvořák",
+    "saint-saëns": "Saint-Saëns", "saint-saens": "Saint-Saëns", "bartók": "Bartók",
+    "bartok": "Bartók", "janacek": "Janáček", "albeniz": "Albéniz", "pärt": "Pärt",
+    "part": "Pärt", "arvo part": "Arvo Pärt", "arvo pärt": "Arvo Pärt",
+    "rimsky-korsakov": "Rimsky-Korsakov", "cpe bach": "C. P. E. Bach",
+    "clara schumann": "Clara Schumann", "fanny mendelssohn": "Fanny Mendelssohn",
+    "max richter": "Max Richter", "howard shore": "Howard Shore", "philip glass": "Philip Glass",
+    "john williams": "John Williams", "hans zimmer": "Hans Zimmer",
+    "joe hisaishi": "Joe Hisaishi", "rachmaninov": "Rachmaninov", "rakhmaninov": "Rachmaninov",
+    "scriabine": "Scriabin", "liadov": "Lyadov",
+}
+
+#: Names that are also ordinary words: taken as a composer only when the
+#: request says so ("in the style of Glass", "like Field") or capitalises them.
+_AMBIGUOUS = {"field", "field ", "glass", "part", "wolf", "williams", "hahn", "barber",
+              "richter", "weber", "strauss", "horner", "reger", "shore"}
+_CUES = ("style of", "manner of", "like", "by", "after", "à la", "a la", "vein of",
+         "inspired by", "spirit of", "such as", "influenced by")
+_GENERIC = {"classical", "romantic", "film"}
+
+
+def named_composer(text: str) -> tuple[str, str] | None:
+    """The composer a request names — any composer, those without a profile
+    of their own writing through their nearest kin (Medtner through
+    Rachmaninoff, Fauré through the Romantics) — as (profile, name as
+    written). The first composer named wins."""
+    import re
+    if not text:
+        return None
+    low = text.lower()
+    names = [k for k in PROFILES if k not in _GENERIC] + list(KIN)
+    best: tuple[int, str] | None = None
+    for name in sorted(set(n.strip() for n in names), key=len, reverse=True):
+        for m in re.finditer(r"(?<![\w-])" + re.escape(name) + r"(?![\w-])", low):
+            if name in _AMBIGUOUS or f"{name} " in _AMBIGUOUS:
+                before = low[max(0, m.start() - 16):m.start()]
+                written = text[m.start():m.end()]
+                if not (any(before.rstrip().endswith(c) for c in _CUES) or
+                        (written[:1].isupper() and m.start() > 0)):
+                    continue
+            if best is None or m.start() < best[0] or \
+                    (m.start() == best[0] and len(name) > len(best[1])):
+                best = (m.start(), name)
+            break
+    if best is None:
+        return None
+    name = best[1]
+    target = name if name in PROFILES else KIN[name] if name in KIN else KIN.get(name + " ")
+    if target is None:
+        return None
+    shown = PROFILES[name].display if name in PROFILES else \
+        _DISPLAY.get(name, " ".join(w.capitalize() for w in name.split()))
+    return target, shown
 
 
 def profile(name: str | None) -> Profile:
@@ -311,9 +381,42 @@ def tempo_class(character: str, prof: Profile) -> str:
     return prof.lean
 
 
-def choose_tempo(prof: Profile, family: str, character: str, rng) -> tuple[str, int]:
+#: Pieces whose name carries its tempo (in quarter notes; a compound metre
+#: takes the dotted beat from it).
+_GENRE_TEMPI = {
+    "gigue": [("Allegro", 132), ("Presto", 150)],
+    "sarabande": [("Lento", 54), ("Grave", 48), ("Largo", 52)],
+    "gavotte": [("Allegretto", 100), ("Tempo di gavotta", 96)],
+    "polonaise": [("Alla polacca", 92), ("Maestoso", 88), ("Allegro maestoso", 100)],
+    "scherzo": [("Presto", 168), ("Vivace", 160), ("Allegro vivace", 152)],
+    "barcarolle": [("Allegretto", 84), ("Andante", 76)],
+    "berceuse": [("Andante", 76), ("Andantino", 80)],
+    "lullaby": [("Andante", 72), ("Andantino", 78)],
+    "siciliano": [("Andante", 72), ("Larghetto", 66)],
+    "siciliana": [("Andante", 72), ("Larghetto", 66)],
+    "march": [("Tempo di marcia", 108), ("Alla marcia", 112), ("Maestoso", 96)],
+    "marche": [("Tempo di marcia", 108), ("Alla marcia", 112)],
+    "tarantella": [("Presto", 176), ("Prestissimo", 184)],
+    "toccata": [("Allegro", 132), ("Presto", 152)],
+    "hymn": [("Andante maestoso", 72), ("Moderato", 80)],
+}
+_GENRE_CLASS = {"gigue": "lively", "sarabande": "slow", "gavotte": "lively",
+                "polonaise": "stormy", "scherzo": "lively", "barcarolle": "lyrical",
+                "berceuse": "slow", "lullaby": "slow", "siciliano": "lyrical",
+                "siciliana": "lyrical", "march": "lively", "marche": "lively",
+                "tarantella": "stormy", "toccata": "stormy", "hymn": "slow"}
+
+
+def choose_tempo(prof: Profile, family: str, character: str, rng, genre: str = ""
+                 ) -> tuple[str, int]:
     """Tempo words and a metronome mark in the composer's own language."""
     cls = tempo_class(character, prof)
+    g = (genre or "").lower()
+    named = next((k for k in _GENRE_TEMPI if k in g), None)
+    if named and prof.language not in ("fr", "de") and not character:
+        return rng.choice(_GENRE_TEMPI[named])
+    if named and not character:
+        cls = _GENRE_CLASS[named]
     if prof.name == "satie":
         return rng.choice([("Lent et douloureux", 66), ("Lent et triste", 60),
                            ("Lent et grave", 58)])
