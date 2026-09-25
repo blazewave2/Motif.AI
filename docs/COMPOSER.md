@@ -57,7 +57,9 @@ A genre is laid out as phrases of four and eight bars. A named kind of
 piece keeps its own metre, tempo and bearing: a gigue, barcarolle, berceuse
 or siciliano in compound time; a sarabande, polonaise or scherzo in three; a
 march or gavotte in duple time; the polonaise with its rhythm in the left
-hand, the march with its bass and dotted fanfares, a toccata running without
+hand, the march with its bass and dotted fanfares, the mazurka's dotted
+downbeats and short–long bars with the stress leaning on the second or third
+beat, a toccata running without
 a break. A prelude, nocturne,
 romance or élégie is ternary: a theme group (a period or sentence pair), a
 middle section in a related key with its own theme and more motion, a short
@@ -103,7 +105,13 @@ A phrase is a grammar of bar roles. A sentence states its idea (bars 1–2),
 repeats it at another level (3–4), takes the first bar in sequence (5),
 breaks it into half-bar fragments (6), runs freely (7) and cadences (8). A
 consequent restates its antecedent's opening over the same chords and closes
-differently. A coda recalls the opening bars and settles.
+differently. A coda recalls the opening bars and settles. In a Classical
+Allegro the transition that leaves the first theme for the new key breaks
+into running passagework, as Mozart's and Haydn's sonatas do. The phrase is
+written as a skeleton line, and every bar but its cadence becomes scales,
+turns and broken chords in sixteenths that find their way from each of its
+notes to the next. The runs are then checked again for parallels against the
+bass, and tritone leaps are kept out of all figuration.
 
 **Harmony** (`harmony.py`) is planned per phrase in functional stages — the
 tonic, the answer to the idea, the predominant, the cadence arrival on the

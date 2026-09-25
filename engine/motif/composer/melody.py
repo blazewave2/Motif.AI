@@ -201,8 +201,20 @@ CELLS["march"] = _cells({
               (3, 4): [[2, 1], [3]]},
 })
 
+CELLS["mazurka"] = _cells({
+    # the dotted downbeat, the short-long bar that leans on beat two, and a
+    # triplet flourish thrown off beat one
+    "idea": {(3, 4): [["3/4", "1/4", 1, 1], [1, 2], ["3/2", "1/2", 1], ["1/3", "1/3", "1/3", 1, 1],
+                      [1, "3/4", "1/4", 1], ["1/2", "1/2", 2], ["3/4", "1/4", 2]]},
+    "flow": {(3, 4): [["3/4", "1/4", "1/2", "1/2", 1], ["1/3", "1/3", "1/3", 1, 1],
+                      ["1/2", "1/2", "1/2", "1/2", 1], [1, "3/4", "1/4", 1], [1, 1, 1],
+                      ["3/4", "1/4", 1, 1]]},
+    "close": {(3, 4): [[2, 1], [3], [1, 2]]},
+})
+
 #: Named kinds of piece whose tunes have a rhythm of their own.
 GENRE_CELLS = {"march": "march", "marche": "march", "polonaise": "march",
+               "mazurka": "mazurka",
                "gigue": "motoric", "tarantella": "motoric", "toccata": "motoric"}
 
 
