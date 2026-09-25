@@ -450,22 +450,37 @@ MuseScore {
 
     function openScore(path, sameFile) {
         var opened = false;
-        try {
-            var s = readScore(path);
-            if (s) {
-                opened = true;
-                try { setScore(s); } catch (e2) { /* some hosts open it directly */ }
+        // MuseScore 4 has no readScore for plugins (it only logs "not
+        // implemented"), so there the engine opens the score instead.
+        if (mscoreMajorVersion < 4) {
+            try {
+                var s = readScore(path);
+                if (s) {
+                    opened = true;
+                    try { setScore(s); } catch (e2) { /* some hosts open it directly */ }
+                }
+            } catch (e) {
+                opened = false;
             }
-        } catch (e) {
-            opened = false;
         }
-        if (!opened) {
+        if (!opened)
+            openWithHost(path, sameFile);
+    }
+
+    // Ask the engine to open the score in this very MuseScore (the program
+    // running the panel), or with whatever the system opens scores with.
+    function openWithHost(path, sameFile) {
+        var app = "";
+        try { app = String(Qt.application.arguments[0] || ""); } catch (e) { app = ""; }
+        Api.openScore(root.serverUrl, root.apiToken, { path: path, app: app }, function (res) {
+            if (res && res.ok)
+                return;
             appendMessage("system", sameFile
                 ? "Motif updated your score, but couldn’t refresh the page on "
                   + "screen. Close and reopen it to see the change."
                 : "Your score is saved in the Motif folder (.motif/scores in your "
                   + "home folder). Open it from there if it didn’t appear.", "", false);
-        }
+        });
     }
 
     function appendMessage(role, text, detail, hasScore) {

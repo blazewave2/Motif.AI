@@ -10,8 +10,8 @@ Item {
     property alias text: input.text
     property bool busy: false
     property bool interactive: true
-    // What was just sent, for handlers to read: MuseScore 3 runs on a Qt
-    // too old to pass a signal's value to a handler by name.
+    // What was just sent, for handlers to read: the version 3 host runs on
+    // a Qt too old to pass a signal's value to a handler by name.
     property string lastSubmitted: ""
     signal submitted(string value)
 
@@ -24,6 +24,13 @@ Item {
         if (v.length === 0 || busy || !interactive) return;
         box.lastSubmitted = v;
         box.submitted(v);
+    }
+
+    // Every key typed here belongs to the text. Version 4 of the host binds
+    // single letters, digits and punctuation to note input, and would take
+    // them before they reached the field unless the field claims them first.
+    function claimKey(event) {
+        event.accepted = true;
     }
 
     // Enter sends; Shift+Enter inserts a newline, as in any chat field.
@@ -76,9 +83,13 @@ Item {
             textFormat: TextEdit.PlainText
 
             // Connected in script rather than written as Keys.onPressed so
-            // the event arrives as a named parameter on every Qt MuseScore
-            // ships with, from MuseScore 3's Qt 5.9 to MuseScore 4's Qt 6.
-            Component.onCompleted: Keys.pressed.connect(box.keyPressed)
+            // the event arrives as a named parameter on every Qt the host
+            // ships with, from version 3's Qt 5.9 to version 4's Qt 6.
+            Component.onCompleted: {
+                Keys.pressed.connect(box.keyPressed);
+                if (Keys.shortcutOverride)
+                    Keys.shortcutOverride.connect(box.claimKey);
+            }
         }
 
         Text {

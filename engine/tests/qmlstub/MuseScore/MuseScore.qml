@@ -10,6 +10,7 @@ Item {
     property string dockArea
     property bool requiresScore
     property var curScore: null
+    property int mscoreMajorVersion: 3
     property var openedPaths: []
     signal run()
     function readScore(path) { openedPaths.push(path); return { path: path }; }

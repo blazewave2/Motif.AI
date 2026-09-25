@@ -233,6 +233,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._preferences(body)
         if route == "/settings":
             return self._settings(body)
+        if route == "/open":
+            return self._open(body)
         if route == "/shutdown":
             threading.Timer(0.2, self.server.shutdown).start()
             return self._json(200, {"ok": True, "message": "shutting down"})
@@ -255,6 +257,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400, {"ok": False, "error": "prompt is required"})
         job = self.state.jobs.submit(lambda j: _run(self.state, body, j))
         return self._json(200, job.view())
+
+    # -- opening a score -----------------------------------------------------
+    def _open(self, body: dict) -> None:
+        """Open a finished score in MuseScore, for hosts whose plugins can't."""
+        from .opener import OPENABLE, inside, open_score
+        path = Path(str(body.get("path") or ""))
+        if not path.is_file() or path.suffix.lower() not in OPENABLE or \
+                not inside(path, OUT_DIR):
+            return self._json(400, {"ok": False, "error": "not a score Motif wrote"})
+        try:
+            ok, how = open_score(path, str(body.get("app") or "") or None)
+        except OSError as exc:
+            return self._json(200, {"ok": False, "error": str(exc)})
+        return self._json(200, {"ok": ok, "how": how} if ok else {"ok": False, "error": how})
 
     # -- settings ---------------------------------------------------------
     def _settings_view(self) -> dict:

@@ -10,6 +10,7 @@
 import QtQuick 2.9
 
 import "../js/theme.js" as T
+import "../js/text.js" as Txt
 
 Item {
     id: panel
@@ -18,9 +19,9 @@ Item {
     property bool connected: false
     property string quality: "best"
 
-    // What was just chosen, for the handlers in MotifAI.qml to read:
-    // MuseScore 3 runs on a Qt too old to pass a signal's value to a handler
-    // by name, so the signals below carry it only for newer ones.
+    // What was just chosen, for the handlers in MotifAI.qml to read: the
+    // version 3 host runs on a Qt too old to pass a signal's value to a
+    // handler by name, so the signals below carry it only for newer ones.
     property alias pickedQuality: qualityChoice.picked
 
     signal changed(bool openAutomatically)
@@ -120,10 +121,9 @@ Item {
             Text {
                 width: parent.width
                 wrapMode: Text.WordWrap
-                text: "MuseScore doesn't let a plugin add its own toolbar button, "
-                      + "but you can give Motif a one-key shortcut instead: open "
-                      + "Plugins → Manage Plugins, select Motif.AI, and choose "
-                      + "Define Shortcut."
+                // (the wording lives in text.js: a component file that names
+                // the host is taken for a plugin of its own by version 4)
+                text: Txt.shortcutHint
                 color: T.textMuted
                 font.family: T.sans
                 font.pixelSize: T.fsSmall

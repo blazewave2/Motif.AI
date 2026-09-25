@@ -9,7 +9,8 @@
  │  progress, Stop, Care │◀───────────────│  MusicXML + MIDI                 │
  └───────────────────────┘   MusicXML     └──────────────────────────────────┘
             │
-            └── readScore() opens it (or reloads the score it changed)
+            ├── MuseScore 3: readScore() opens it (or reloads the score it changed)
+            └── MuseScore 4: the engine opens it in a new MuseScore window
 ```
 
 Nothing leaves the computer. The composer is Motif's own — rules of harmony,
@@ -138,6 +139,21 @@ regardless of the "open automatically" preference, since leaving a stale
 version on screen while the file underneath it changed risks the next save
 overwriting Motif's work. A genuinely new, unrelated piece — even while a
 score happens to be open — always gets its own file.
+
+**MuseScore 4 opens the score through the engine.** MuseScore 4's plugin
+API has no working `readScore()`, so there the panel posts the finished
+file's path to `/open` together with the path of the program it is running
+in (`Qt.application.arguments[0]`). `server/opener.py` starts that MuseScore
+with the file, which opens it in a window of its own. The route only opens
+files in Motif's own scores folder, and only with a program named as a
+MuseScore. An AppImage's inner program cannot start outside its image, so
+the image itself is started (read from the running MuseScore's
+`$APPIMAGE`), and the new window borrows the running MuseScore's display
+settings in case the engine was started outside the desktop session. A
+MuseScore that fails to start within a moment hands the file to the
+system's own opener. Setup also switches the panel on in MuseScore 4.4 and
+later (its `extensions/config.json`), which would otherwise list it
+switched off.
 
 **Seeds are reproducible.** The same prompt and seed produce a byte-identical
 score; a different seed produces different music. "Try again" in the panel is

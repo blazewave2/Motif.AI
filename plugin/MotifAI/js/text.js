@@ -8,6 +8,10 @@
 // the global one, which URL-encodes, even from inside this file.
 .pragma library
 
+var shortcutHint = "MuseScore doesn't let a plugin add its own toolbar button, "
+    + "but you can give Motif a one-key shortcut instead: open "
+    + "Plugins → Manage Plugins, select Motif.AI, and choose Define Shortcut.";
+
 function escapeMarkup(s) {
     return String(s === undefined || s === null ? "" : s)
         .replace(/&/g, "&amp;")

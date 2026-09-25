@@ -171,3 +171,32 @@ def test_replies_are_shown_as_text_not_markup(qt_app):
     assert show("3 * 4 * 5") == "3 * 4 * 5"
     assert show("first line\nsecond") == "first line<br>second"
     assert show("<b>not markup</b>") == "&lt;b&gt;not markup&lt;/b&gt;"
+
+
+def test_only_the_panel_itself_looks_like_a_plugin():
+    """MuseScore 4 lists every .qml file that names it as a plugin of its
+    own, so the panel's components must not mention it, even in a comment."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2] / "plugin" / "MotifAI"
+    named = [p.name for p in root.rglob("*.qml") if "MuseScore" in p.read_text()]
+    assert named == ["MotifAI.qml"]
+
+
+def test_on_musescore_4_the_engine_opens_the_score(panel, monkeypatch):
+    """MuseScore 4's plugins cannot open a score themselves, so the panel
+    asks the engine to open it with the program the panel runs in."""
+    from motif.server import opener
+    opened: list = []
+    monkeypatch.setattr(opener, "open_score",
+                        lambda path, app=None: (opened.append((path, app)) or (True, "musescore")))
+    panel.js("root.mscoreMajorVersion = 4")
+    panel.call("send", "Write me a short nocturne", False)
+    assert panel.spin(lambda: not panel.prop("busy"), 120)
+    assert panel.spin(lambda: bool(opened), 10)
+    assert int(panel.js("root.openedPaths.length")) == 0
+    path, app = opened[0]
+    assert path.suffix == ".musicxml" and path.exists()
+    # and no apology for a score that did open
+    texts = [panel.js(f"conversation.get({i}).text") for i in range(int(panel.js("conversation.count")))]
+    assert not [t for t in texts if "didn’t appear" in t]
+

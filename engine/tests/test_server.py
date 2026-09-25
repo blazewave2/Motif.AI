@@ -2,6 +2,7 @@
 progress endpoint the panel polls while composing."""
 import json
 import threading
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -127,3 +128,73 @@ class TestProgressEndpoint:
         _post(server, "/compose", {"prompt": "Compose a short piano piece"})
         after = _get(server, "/progress")
         assert after["text"] == ""          # reset once the request finishes
+
+
+class TestOpeningScores:
+    """MuseScore 4's plugins cannot open a score, so the engine does."""
+
+    def test_only_its_own_scores_with_a_musescore(self, server, tmp_path, monkeypatch):
+        from motif.server import opener
+        from motif.server import app as app_module
+        opened = []
+        monkeypatch.setattr(opener, "open_score",
+                            lambda path, app=None: opened.append((path, app)) or (True, "musescore"))
+        outside = tmp_path / "elsewhere.musicxml"
+        outside.write_text("<score-partwise/>")
+        with pytest.raises(urllib.error.HTTPError):
+            _post(server, "/open", {"path": str(outside)})
+        mine = app_module.OUT_DIR / "Nocturne.musicxml"
+        mine.write_text("<score-partwise/>")
+        assert _post(server, "/open", {"path": str(mine), "app": "/usr/bin/mscore"})["ok"]
+        assert opened == [(mine, "/usr/bin/mscore")]
+        assert opener.is_musescore("/Applications/MuseScore 4.app/Contents/MacOS/mscore")
+        assert opener.is_musescore("C:/Program Files/MuseScore 4/bin/MuseScore4.exe")
+        assert not opener.is_musescore("/bin/sh")
+
+    def test_an_appimage_musescore_is_started_through_its_image(self, tmp_path):
+        from motif.server.opener import program
+        inner = tmp_path / "squashfs-root" / "bin" / "mscore4portable"
+        inner.parent.mkdir(parents=True)
+        inner.write_text("")
+        apprun = tmp_path / "squashfs-root" / "AppRun"
+        apprun.write_text("#!/bin/sh\n")
+        apprun.chmod(0o755)
+        # the inner program cannot find its libraries by itself
+        assert program(str(inner)) == [str(apprun)]
+        image = tmp_path / "MuseScore-Studio-4.6.AppImage"
+        image.write_text("")
+        image.chmod(0o755)
+        assert program(str(inner), {"APPIMAGE": str(image)}) == [str(image)]
+        assert program("/usr/bin/mscore") == ["/usr/bin/mscore"]
+
+    def test_the_new_window_goes_on_the_musicians_screen(self, monkeypatch):
+        from motif.server.opener import session_env
+        monkeypatch.delenv("DISPLAY", raising=False)
+        env = session_env({"DISPLAY": ":1", "HOME": "/somewhere/else"})
+        assert env["DISPLAY"] == ":1"
+        assert env.get("HOME") != "/somewhere/else"
+        assert session_env({}) is None
+
+    @pytest.mark.skipif(not hasattr(__import__("os"), "fork"), reason="POSIX programs")
+    def test_a_musescore_that_cannot_start_hands_over_to_the_system(self, tmp_path, monkeypatch):
+        from motif.server import opener
+        monkeypatch.setattr(opener, "_SETTLE", 0.5)
+        monkeypatch.setattr(opener, "environment_of", lambda app: {})
+        score = tmp_path / "Waltz.musicxml"
+        score.write_text("<score-partwise/>")
+        broken = tmp_path / "bin" / "mscore"
+        broken.parent.mkdir()
+        broken.write_text("#!/bin/sh\nexit 127\n")
+        broken.chmod(0o755)
+        handed = []
+        monkeypatch.setattr(opener, "_system_open",
+                            lambda path, env=None: handed.append(path) or (True, "system"))
+        assert opener.open_score(score, str(broken)) == (True, "system")
+        assert handed == [score]
+        # one that starts and stays open is MuseScore at work
+        seen = tmp_path / "seen"
+        working = tmp_path / "bin" / "MuseScore4"
+        working.write_text(f'#!/bin/sh\necho "$1" > "{seen}"\nsleep 3\n')
+        working.chmod(0o755)
+        assert opener.open_score(score, str(working)) == (True, "musescore")
+        assert seen.read_text().strip() == str(score)
