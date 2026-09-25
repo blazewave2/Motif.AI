@@ -17,6 +17,7 @@ calls into this module.
 from __future__ import annotations
 
 import random
+import re
 from typing import Protocol
 
 from ..plan import CompositionPlan
@@ -40,6 +41,12 @@ _FORCES = {"solo_piano": "solo piano", "piano_concerto": "piano and orchestra",
           "string_orchestra": "string orchestra", "orchestra": "orchestra",
           "violin_piano": "violin and piano", "cello_piano": "cello and piano",
           "voice_piano": "voice and piano", "chamber": "chamber ensemble"}
+
+
+def _pretty_key(key) -> str:
+    """A key as a musician writes it: B♭ minor, F♯ major."""
+    text = str(key)
+    return re.sub(r"\b([A-G])b\b", "\\1♭", re.sub(r"\b([A-G])#", "\\1♯", text))
 
 
 def _forces(ensemble: str) -> str:
@@ -103,10 +110,33 @@ _TEXTURE_WORDS = {
     "sustained": ["open, pedalled harmonies", "still, open sonorities"],
 }
 _GENRE_NAMES = {"etude-tableau": "étude-tableau", "etude": "étude", "elegie": "élégie",
-                "gymnopedie": "gymnopédie", "lyric piece": "lyric piece"}
+                "gymnopedie": "gymnopédie", "lyric piece": "lyric piece",
+                "variations": "theme and variations", "variation": "theme and variations",
+                "theme_and_variations": "theme and variations",
+                # a form's technical name is not what anyone calls a piece
+                "ternary": "piece", "period": "piece", "binary": "piece",
+                "rounded_binary": "piece", "through_composed": "piece",
+                "ostinato_form": "piece", "sonata_binary": "piece", "chorale": "chorale",
+                "song_without_words": "song without words", "lyric_piece": "lyric piece"}
 
 
-def _texture_phrase(tex: str, rng: random.Random) -> str:
+#: How the accompaniment sounds when no piano plays it: the inner parts and
+#: the bass of a quartet or an orchestra.
+_ENSEMBLE_TEXTURE_WORDS = {
+    "block": ["sustained harmony in the lower parts", "full chords in the lower parts"],
+    "repeated": ["pulsing repeated chords", "throbbing inner parts"],
+    "walking": ["a walking bass", "a bass line that walks"],
+    "bells": ["tolling octaves in the bass", "deep, tolling basses"],
+    "waltz": ["a waltz accompaniment", "the lilt of a waltz"],
+    "sustained": ["long-held harmonies", "still, sustained harmonies"],
+}
+_PIANO_LESS = ("string_quartet", "string_orchestra", "orchestra", "chamber")
+
+
+def _texture_phrase(tex: str, rng: random.Random, ensemble: str = "") -> str:
+    if ensemble in _PIANO_LESS:
+        return rng.choice(_ENSEMBLE_TEXTURE_WORDS.get(
+            tex, ["flowing inner parts", "inner parts in gentle motion"]))
     return rng.choice(_TEXTURE_WORDS.get(tex, ["a flowing accompaniment"]))
 
 
@@ -124,7 +154,7 @@ def composed_message(plan: CompositionPlan, summary: dict,
     genre = summary.get("genre") or plan.form
     genre = _GENRE_NAMES.get(genre, genre).replace("_", " ")
     forces = _forces(summary.get("ensemble") or plan.ensemble)
-    key = summary.get("key", plan.key)
+    key = _pretty_key(summary.get("key", plan.key))
     bars = summary.get("bars", plan.total_bars)
     tempo_text = summary.get("tempo_text") or ""
     num, den = summary.get("time", plan.time)
@@ -143,17 +173,31 @@ def composed_message(plan: CompositionPlan, summary: dict,
     ])
     lines = [opener]
     secs = summary.get("sections", [])
+    if summary.get("scope"):
+        return _try_rewrite(voice, _part_message(plan, summary, key, bars, tempo, style, rng),
+                            {"kind": "create", "plan": plan, "summary": summary})
+    if summary.get("family") == "variations":
+        story = _variations_story(secs, summary, key, rng)
+        if story:
+            lines.append("\n\n" + " ".join(story))
+        if plan.character:
+            lines.append(f"\n\nI aimed for something {plan.character}.")
+        plain = "".join(lines)
+        return _try_rewrite(voice, plain, {"kind": "create", "plan": plan, "summary": summary})
     story = []
     th = summary.get("theme", {})
     shape = th.get("shape", 0)
     shape_word = "rising" if shape > 0 else "falling" if shape < 0 else "arching"
     described: set[str] = set()
-    for sec in secs:
+    rondo = summary.get("family") == "rondo"
+    episodes = 0
+    returns = [i for i, sec in enumerate(secs) if sec["role"] in ("return", "climax")]
+    for si, sec in enumerate(secs):
         role, a, b = sec["role"], sec["start"], sec["end"]
         if sec["texture"] in described:
             tex = rng.choice(["the same accompaniment", "the accompaniment heard before"])
         else:
-            tex = _texture_phrase(sec["texture"], rng)
+            tex = _texture_phrase(sec["texture"], rng, summary.get("ensemble", ""))
             described.add(sec["texture"])
         forces = sec.get("forces", "")
         if role == "intro" and forces == "solo":
@@ -166,7 +210,7 @@ def composed_message(plan: CompositionPlan, summary: dict,
             story.append(f"The orchestra opens with the theme ({_bars(a, b)}) before the "
                          f"soloist enters.")
         elif role == "contrast" and forces == "solo_lead":
-            story.append(f"The piano sings the second theme in {sec['key']} ({_bars(a, b)}) over "
+            story.append(f"The piano sings the second theme in {_pretty_key(sec['key'])} ({_bars(a, b)}) over "
                          f"quiet strings, and the orchestra takes it up in turn.")
         elif role == "cadenza":
             story.append(f"A cadenza for the piano alone ({_bars(a, b)}) holds on the dominant "
@@ -174,6 +218,26 @@ def composed_message(plan: CompositionPlan, summary: dict,
         elif role == "climax" and forces == "tutti":
             story.append(f"The theme returns at the climax ({_bars(a, b)}) with the full "
                          f"orchestra and the piano's massive chords together.")
+        elif rondo and role == "theme":
+            story.append(f"The refrain ({_bars(a, b)}) is a {shape_word} tune that closes "
+                         f"at home, over {tex}.")
+        elif rondo and role == "contrast":
+            episodes += 1
+            if episodes == 1:
+                story.append(f"The first episode ({_bars(a, b)}) moves to {_pretty_key(sec['key'])} with "
+                             f"a theme of its own over {tex}, and finds its way back over "
+                             f"the dominant.")
+            else:
+                story.append(f"The second episode ({_bars(a, b)}) turns to {_pretty_key(sec['key'])} "
+                             f"with yet another theme, over {tex}.")
+        elif rondo and role in ("return", "climax"):
+            last = returns and si == returns[-1]
+            how = {"ornament": ", ornamented", "octaves": " in octaves"}.get(
+                sec.get("variation", ""), "")
+            story.append(f"At last the refrain returns{how} ({_bars(a, b)}), at its fullest."
+                         if last else f"The refrain returns{how} ({_bars(a, b)}).")
+        elif rondo and role == "transition":
+            continue
         elif role == "intro":
             story.append(f"It opens with {_bars(a, b)} of accompaniment alone — {tex}.")
         elif role == "theme":
@@ -187,16 +251,16 @@ def composed_message(plan: CompositionPlan, summary: dict,
                          f"{answer}, then broken down towards its cadence, over {tex}.")
         elif role == "contrast":
             words = f", {sec['words']}," if sec.get("words") else ""
-            story.append(f"The middle section{words} moves to {sec['key']} ({_bars(a, b)}) "
+            story.append(f"The middle section{words} moves to {_pretty_key(sec['key'])} ({_bars(a, b)}) "
                          f"with a new, contrasting theme over {tex}.")
         elif role == "transition":
-            if sec["key"] != key:
-                story.append(f"A short passage ({_bars(a, b)}) leads to {sec['key']}.")
+            if _pretty_key(sec["key"]) != key:
+                story.append(f"A short passage ({_bars(a, b)}) leads to {_pretty_key(sec['key'])}.")
             else:
                 story.append(f"A short passage ({_bars(a, b)}) leads back home.")
         elif role == "development":
             story.append(f"{_bars(a, b).capitalize()} develop the opening idea in sequence "
-                         f"through {sec['key']}.")
+                         f"through {_pretty_key(sec['key'])}.")
         elif role == "climax":
             story.append(f"The theme returns at the climax ({_bars(a, b)}), in octaves over "
                          f"{tex}.")
@@ -206,6 +270,8 @@ def composed_message(plan: CompositionPlan, summary: dict,
             story.append(f"The theme comes back{how} in {_bars(a, b)}.")
         elif role == "closing" and forces == "tutti":
             story.append(f"A coda for everyone ({_bars(a, b)}) brings it home in full voice.")
+        elif role == "closing" and sec.get("energy", 0.3) >= 0.6:
+            story.append(f"A coda ({_bars(a, b)}) brings it to a brilliant close.")
         elif role == "closing":
             story.append(f"A coda ({_bars(a, b)}) remembers the opening and settles.")
     # merge duplicate sentences for repeated sections
@@ -223,6 +289,121 @@ def composed_message(plan: CompositionPlan, summary: dict,
                                  f"\n\nThe character throughout is {plan.character}."]))
     plain = "".join(lines)
     return _try_rewrite(voice, plain, {"kind": "create", "plan": plan, "summary": summary})
+
+
+_PART_NAMES = {"motif": "motif", "phrase": "phrase", "theme": "theme",
+               "introduction": "introduction", "cadenza": "cadenza",
+               "progression": "chord progression"}
+
+
+def _part_message(plan: CompositionPlan, summary: dict, key: str, bars: int, tempo: str,
+                  style: str, rng: random.Random) -> str:
+    """Describe part of a piece: what it is, what it does, and how to go on
+    from it."""
+    scope = summary["scope"]
+    name = _PART_NAMES.get(scope, scope)
+    if scope == "theme" and "melody" in (plan.prompt or "").lower():
+        name = "melody"
+    idiom = f" in the manner of {style}" if style and style.lower() not in (
+        "romantic", "classical", "cinematic") else ""
+    th = summary.get("theme", {})
+    shape = th.get("shape", 0)
+    shape_word = "rising" if shape > 0 else "falling" if shape < 0 else "arching"
+    secs = summary.get("sections", [])
+    tex = _texture_phrase(secs[-1]["texture"], rng, summary.get("ensemble", "")) \
+        if secs else "the accompaniment"
+    article = "an" if f"{bars}"[:1] == "8" or f"{bars}" in ("11", "18") else "a"
+    head = f"Here's **{plan.title}** — {article} {bars}-bar {name}{idiom} in {key} ({tempo})."
+    if scope == "motif":
+        body = (f"It is a {shape_word} idea" +
+                (" stated and answered, closing at home" if bars >= 3 else "") +
+                f", over {tex}. Ask me to develop it into a piece whenever you like.")
+    elif scope == "phrase":
+        body = (f"A {shape_word} idea is stated, answered at another level, broken down and "
+                f"brought to a full close, over {tex}.")
+    elif scope == "theme":
+        body = (f"A {shape_word} tune in two halves — one that pauses on the dominant and one "
+                f"that answers it and closes at home" +
+                ("." if summary.get("melody_only") else f" — over {tex}."))
+    elif scope == "introduction":
+        body = (f"It sets the scene over {tex} and comes to rest on the dominant, ready for "
+                f"what follows.")
+    elif scope == "cadenza":
+        body = ("Runs sweep up and down the keyboard over the held harmony and come to rest "
+                "on a trill over the dominant, under a fermata — ready for the orchestra "
+                "to come back in.")
+    else:
+        chords = summary.get("progression") or []
+        shown = " – ".join(chords[:12]) + (" …" if len(chords) > 12 else "")
+        body = (f"The chords are named above the staff; in Roman numerals it runs "
+                f"{shown}. Voice-led, with the bass in the left hand.")
+    tail = ""
+    if summary.get("melody_only"):
+        tail = ("\n\nIt is the tune alone, with the left hand left empty — ask me to add a "
+                "left-hand accompaniment when you want one.")
+    return head + "\n\n" + body + tail
+
+
+def _variations_story(secs: list[dict], summary: dict, key: str,
+                      rng: random.Random) -> list[str]:
+    """A set of variations told section by section: what the theme is and
+    what each variation does to it."""
+    th = summary.get("theme", {})
+    shape = th.get("shape", 0)
+    shape_word = "rising" if shape > 0 else "falling" if shape < 0 else "arching"
+    out: list[str] = []
+    described: set[str] = set()
+
+    def dress(tex: str) -> str:
+        if tex in described:
+            return rng.choice(["the accompaniment heard before", "the same accompaniment"])
+        described.add(tex)
+        return _texture_phrase(tex, rng, summary.get("ensemble", ""))
+
+    for sec in secs:
+        role, a, b, name = sec["role"], sec["start"], sec["end"], sec["name"]
+        var, tex = sec.get("variation", ""), sec["texture"]
+        tempo = sec.get("tempo_words", "")
+        where = f" ({_bars(a, b)})"
+        article = "an" if tempo[:1].lower() in "aeiou" else "a"
+        if role == "theme":
+            out.append(f"The theme{where} is a simple {shape_word} tune in two phrases — one "
+                       f"that pauses on the dominant and one that answers it and closes — "
+                       f"over {dress(tex)}.")
+            continue
+        if role == "closing":
+            quiet = sec.get("energy", 0.5) < 0.5
+            out.append(f"A coda{where} " + ("remembers the theme quietly and settles."
+                                            if quiet else "brings the set to a brilliant close."))
+            continue
+        if var == "figural" and tempo and tempo != "Tempo I":
+            what = f"— {tempo} — breaks every note of the tune into running arpeggios"
+        elif var == "figural":
+            what = "decorates every note of the tune in running figuration"
+        elif var == "figural3":
+            what = "carries the tune in flowing triplets"
+        elif var == "minore":
+            what = f"turns to {_pretty_key(sec['key'])} — the minore"
+        elif var == "maggiore":
+            what = f"turns to {_pretty_key(sec['key'])} — the maggiore"
+        elif var == "tenor" or sec.get("register") == "tenor":
+            what = "gives the tune to the left hand, cantabile, under soft repeated chords"
+        elif var == "ornament" and tempo in ("Più lento", "Langsamer", "Plus lent"):
+            what = f"holds back ({tempo}), lingering on the tune's long notes and " \
+                   f"decorating them"
+        elif var == "ornament" and tempo and tempo != "Tempo I":
+            what = f"slows to {article} {tempo}, holding the tune's long notes and " \
+                   f"decorating them"
+        elif var == "ornament":
+            what = f"ornaments the tune over {dress(tex)}"
+        elif var == "octaves" and role == "climax":
+            what = "brings the theme back in full chords and octaves at its grandest"
+        elif var == "octaves":
+            what = f"doubles the tune in octaves over {dress(tex)}"
+        else:
+            what = f"keeps the tune and sets it over {dress(tex)}"
+        out.append(f"{name}{where} {what}.")
+    return out
 
 
 def continued_message(plan: CompositionPlan, existing_title: str, bars: int,

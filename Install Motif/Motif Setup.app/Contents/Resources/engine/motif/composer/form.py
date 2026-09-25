@@ -12,6 +12,7 @@ which earlier phrase it brings back, so the music is heard to come home.
 from __future__ import annotations
 
 import random
+import re
 from dataclasses import dataclass, field
 
 from ..theory.pitch import Key
@@ -39,6 +40,7 @@ class PhraseSpec:
     #: piano accompanying) or cadenza.
     forces: str = ""
     register: str = ""           # "tenor": the tune moves to the left hand, under the harmony
+    tempo_words: str = ""        # a new tempo at the start of the section (Adagio, Allegro …)
 
 
 @dataclass
@@ -71,12 +73,19 @@ def _related(key: Key, which: str) -> Key:
 
 
 def plan_form(genre: str, prof: Profile, key: Key, target_bars: int,
-              rng: random.Random, character: str = "") -> FormPlan:
-    """Lay out a piece of about ``target_bars`` bars in ``genre``."""
+              rng: random.Random, character: str = "", **options) -> FormPlan:
+    """Lay out a piece of about ``target_bars`` bars in ``genre`` (``options``
+    say more about forms that take them: how many variations, how long a
+    theme, or — as ``scope`` — the part of a piece that was asked for)."""
     genre = (genre or "").lower()
+    if options.get("scope"):
+        plan = _fragment(prof, key, target_bars, rng, character, **options)
+        _dress_for_genre(plan, genre, prof)
+        return plan
     fn = _TEMPLATES.get(_genre_family(genre), _ternary)
-    plan = fn(prof, key, max(8, target_bars), rng, character)
+    plan = fn(prof, key, max(8, target_bars), rng, character, **options)
     plan.genre = genre or plan.genre
+    _dress_for_genre(plan, genre, prof)
     if "fugue" in genre or "fugato" in genre:
         # a fugue answers its subject at the fifth, in the dominant
         for p in plan.phrases:
@@ -86,13 +95,49 @@ def plan_form(genre: str, prof: Profile, key: Key, target_bars: int,
     return plan
 
 
+#: Accompaniments a named kind of piece has, by role (the rest as the
+#: composer's own): the polonaise rhythm, the march bass, a toccata's
+#: unbroken figuration.
+_GENRE_TEXTURES = {
+    "polonaise": {"theme": "polonaise", "return": "polonaise", "climax": "polonaise",
+                  "closing": "polonaise"},
+    "march": {"theme": "march", "return": "march", "contrast": "march", "closing": "march"},
+    "marche": {"theme": "march", "return": "march", "contrast": "march", "closing": "march"},
+    "sarabande": {"theme": "block", "return": "block"},
+    "hymn": {"theme": "block", "return": "block", "contrast": "block", "closing": "block"},
+    "scherzo": {"theme": "waltz", "return": "waltz"},
+    "gavotte": {"theme": "block", "return": "block"},
+}
+
+
+def _dress_for_genre(plan: FormPlan, genre: str, prof: Profile) -> None:
+    for name, by_role in _GENRE_TEXTURES.items():
+        if name in genre:
+            for p in plan.phrases:
+                if p.role in by_role and p.kind != "intro":
+                    p.texture = by_role[p.role]
+            break
+    if "toccata" in genre:
+        for p in plan.phrases:
+            if p.role != "intro":
+                p.texture = "walking" if prof.harmony == "baroque" else "sweep16"
+    if "polonaise" in genre or "march" in genre or "marche" in genre:
+        # a polonaise and a march are stately, not dreamy
+        for p in plan.phrases:
+            if p.role in ("theme", "return"):
+                p.energy = max(p.energy, 0.62)
+                if p.new_section and p.words in ("", "dolce", "cantabile", "espressivo"):
+                    p.words = "maestoso" if "polonaise" in genre else "marcato"
+
+
 #: Textures that can set the scene on their own before the tune comes in.
 _INTRO_TEXTURES = ("nocturne", "sweep", "sweep16", "bells", "repeated", "waltz", "sustained")
 
 
 def _add_intro(plan: FormPlan, prof: Profile, target_bars: int, rng: random.Random) -> None:
     """A bar or two of accompaniment alone, as so many Romantic pieces begin."""
-    if not plan.phrases or plan.genre in ("concerto", "continuation", "invention"):
+    if not plan.phrases or plan.genre in ("concerto", "continuation", "invention") or \
+            _genre_family(plan.genre) == "variations":
         return
     first = plan.phrases[0]
     if first.role != "theme" or first.texture not in _INTRO_TEXTURES or \
@@ -114,23 +159,80 @@ def genre_family(genre: str) -> str:
 #: Names of pieces a request may ask for, most specific first.
 GENRE_WORDS = (
     "etude-tableau", "étude-tableau", "etude tableau", "song without words", "moment musical",
-    "concerto",
+    "concerto", "theme and variations", "variations", "variation", "rondo", "rondeau",
     "lyric piece", "gymnopédie", "gymnopedie", "gnossienne", "liebestraum", "consolation",
     "nocturne", "prelude", "prélude", "waltz", "valse", "mazurka", "polonaise", "sonatina",
     "sonata", "minuet", "menuet", "gavotte", "sarabande", "gigue", "invention", "fugue",
     "toccata", "etude", "étude", "study", "romance", "elegie", "élégie", "elegy", "berceuse",
     "barcarolle", "reverie", "rêverie", "intermezzo", "impromptu", "ballade", "rhapsody",
     "fantasy", "fantasia", "scherzo", "arabesque", "lied", "song",
+    "march", "marche", "tarantella", "siciliano", "siciliana", "lullaby", "hymn",
+    "humoresque", "fairy tale", "skazka", "bagatelle", "novelette", "caprice", "capriccio",
+    "serenade", "idyll", "album leaf", "albumblatt",
 )
 
 
+_NOT_A_GENRE = re.compile(r"\s+(film|movie|game|scene|story|novel|world|series|show|trailer|"
+                          r"soundtrack|book|land|tale\b)")
+
+
 def detect_genre(text: str) -> str | None:
-    """The kind of piece a request names, if it names one."""
+    """The kind of piece a request names, if it names one ("a fantasy film"
+    names a film, not a fantasia)."""
     t = (text or "").lower()
     for w in GENRE_WORDS:
-        if w in t:
-            return w
+        i = t.find(w)
+        while i >= 0:
+            if not _NOT_A_GENRE.match(t, i + len(w)):
+                return w
+            i = t.find(w, i + 1)
     return None
+
+
+def detect_scope(text: str) -> str | None:
+    """The part of a piece a request asks for, when it asks for only a part:
+    a motif, a phrase, a theme (or melody, or tune), an introduction, a
+    cadenza or a chord progression."""
+    import re
+    t = (text or "").lower()
+    if re.search(r"\b(chord progression|progression|chord sequence|sequence of chords)\b", t):
+        return "progression"
+    if "cadenza" in t and "concerto" not in t:
+        return "cadenza"
+    if re.search(r"\b(introduction|intro)\b", t) and not \
+            re.search(r"\bwith (an? |the )?(short |brief |slow )?(introduction|intro)\b", t):
+        return "introduction"
+    if re.search(r"\b(motif|motive|musical idea|melodic idea|melodic cell)\b", t) and not \
+            re.search(r"\b(on|from|using|around|based on|built on|develop|out of)\s+"
+                      r"(an?|this|the|my)?\s*(\w+\s+)?(motif|motive)", t):
+        return "motif"
+    named = detect_genre(t)
+    if named and named not in ("song",):
+        return None
+    if re.search(r"\bphrase\b", t):
+        return "phrase"
+    if re.search(r"\b(theme|melody|tune)\b", t) and not \
+            re.search(r"variation|on a theme|theme (of|by|from)|themes? and|theme song", t):
+        return "theme"
+    return None
+
+
+#: Words asking for the tune alone.
+_MELODY_ONLY = ("no accompaniment", "without accompaniment", "unaccompanied", "melody only",
+                "only the melody", "just the melody", "just a melody", "melody alone",
+                "tune alone", "just the tune", "just a tune", "only a melody", "single line",
+                "melodic line only", "a cappella", "no left hand", "without a left hand",
+                "right hand only", "just the right hand")
+
+
+def melody_only(text: str) -> bool:
+    t = (text or "").lower()
+    return any(w in t for w in _MELODY_ONLY)
+
+
+#: How long each part of a piece is when the request doesn't say.
+SCOPE_BARS = {"motif": 4, "phrase": 8, "theme": 8, "introduction": 4, "cadenza": 8,
+              "progression": 8}
 
 
 #: Usual metres for each family of pieces, with how often each is chosen.
@@ -141,10 +243,33 @@ _METRES = {
     "etude": [((4, 4), 6), ((2, 4), 2), ((6, 8), 1)],
     "sonata": [((4, 4), 6), ((3, 4), 2), ((2, 4), 1)],
     "invention": [((4, 4), 6), ((3, 4), 2)],
+    "rondo": [((2, 4), 4), ((6, 8), 3), ((4, 4), 3)],
 }
 
 
-def choose_metre(family: str, prof: Profile, rng: random.Random) -> tuple[int, int]:
+#: Pieces whose name fixes their metre, whatever family they belong to.
+_GENRE_METRES = {
+    "gigue": [((6, 8), 3), ((12, 8), 2)], "barcarolle": [((6, 8), 2), ((12, 8), 3)],
+    "berceuse": [((6, 8), 1)], "lullaby": [((6, 8), 2), ((3, 4), 1)],
+    "siciliano": [((6, 8), 2), ((12, 8), 1)], "siciliana": [((6, 8), 2), ((12, 8), 1)],
+    "sarabande": [((3, 4), 1)], "gavotte": [((4, 4), 1)], "polonaise": [((3, 4), 1)],
+    "scherzo": [((3, 4), 1)], "march": [((4, 4), 2), ((2, 4), 1)],
+    "marche": [((4, 4), 2), ((2, 4), 1)], "tarantella": [((6, 8), 1)],
+    "toccata": [((4, 4), 2), ((2, 4), 1)], "hymn": [((4, 4), 2), ((3, 4), 1)],
+}
+
+
+def genre_metres(genre: str) -> list | None:
+    g = (genre or "").lower()
+    return next((v for k, v in _GENRE_METRES.items() if k in g), None)
+
+
+def choose_metre(family: str, prof: Profile, rng: random.Random, genre: str = ""
+                 ) -> tuple[int, int]:
+    named = genre_metres(genre)
+    if named:
+        metres, weights = zip(*named)
+        return rng.choices(metres, weights)[0]
     if prof.name == "satie":
         return (3, 4)
     opts = _METRES.get(family, _METRES["prelude"])
@@ -158,17 +283,23 @@ def _genre_family(genre: str) -> str:
     for fam, words in (
         ("continuation", ("continuation",)),
         ("concerto", ("concerto",)),
+        ("variations", ("variation",)),
+        ("rondo", ("rondo", "rondeau")),
         ("waltz", ("waltz", "valse", "ländler")),
         ("mazurka", ("mazurka", "polonaise")),
         ("sonata", ("sonata", "sonatina", "first movement")),
-        ("minuet", ("minuet", "menuet", "gavotte", "bourrée", "sarabande", "gigue")),
-        ("invention", ("invention", "fugue", "toccata", "partita", "sinfonia")),
-        ("etude", ("etude", "étude", "study", "toccata", "etude-tableau")),
+        ("minuet", ("minuet", "menuet", "gavotte", "bourrée", "sarabande", "gigue", "march",
+                    "marche")),
+        ("invention", ("invention", "fugue", "partita", "sinfonia")),
+        ("etude", ("etude", "étude", "study", "toccata", "etude-tableau", "tarantella")),
         ("nocturne", ("nocturne", "romance", "song", "elegie", "élégie", "elegy", "lied",
                       "berceuse", "barcarolle", "reverie", "rêverie", "consolation",
-                      "liebestraum", "lyric", "intermezzo", "impromptu", "moment")),
+                      "liebestraum", "lyric", "intermezzo", "impromptu", "moment",
+                      "siciliano", "siciliana", "lullaby", "hymn", "serenade", "idyll",
+                      "album leaf", "albumblatt")),
         ("prelude", ("prelude", "prélude", "ballade", "rhapsody", "fantasy", "fantasia",
-                     "scherzo", "piece", "")),
+                     "scherzo", "piece", "humoresque", "fairy tale", "skazka", "bagatelle",
+                     "novelette", "caprice", "capriccio", "")),
     ):
         if any(w and w in genre for w in words):
             return fam
@@ -188,7 +319,7 @@ def _tex(prof: Profile, role: str, rng: random.Random, choice: dict) -> str:
     return choice[role]
 
 
-def _ternary(prof: Profile, key: Key, bars: int, rng: random.Random, character: str
+def _ternary(prof: Profile, key: Key, bars: int, rng: random.Random, character: str, **_
              ) -> FormPlan:
     """ABA' with a coda: preludes, romances, elegies, most character pieces."""
     tx: dict = {}
@@ -262,6 +393,10 @@ def _theme_group(section: str, role: str, key: Key, bars: int, prof: Profile,
                  short: bool = False) -> list[PhraseSpec]:
     out: list[PhraseSpec] = []
     tex = _tex(prof, role, rng, tx)
+    if short and bars <= 4:
+        # the smallest theme: one phrase that closes
+        return [_phr(section, role, "antecedent", 4, key, "PAC", energy, tex, new_section=True,
+                     words=words)]
     if short and bars <= 8:
         # a small period: four bars that ask, four that answer
         return [_phr(section, role, "antecedent", 4, key, "HC", energy, tex, new_section=True,
@@ -301,59 +436,100 @@ def _phrase_bars(x: float) -> int:
     return max(8, int(round(x / 8)) * 8)
 
 
-def _waltz(prof: Profile, key: Key, bars: int, rng: random.Random, character: str
+def _waltz(prof: Profile, key: Key, bars: int, rng: random.Random, character: str, **_
            ) -> FormPlan:
+    """A chain of strains: the waltz tune, a second strain in another key,
+    the tune again — and in a longer waltz a third strain with a tune of its
+    own and the waltz tune once more — and a coda. A strain is sixteen bars,
+    or eight in a short waltz."""
     tx: dict = {"theme": "waltz", "contrast": "waltz", "return": "waltz", "closing": "waltz"}
     b_key = _related(key, "relative" if key.is_minor else rng.choice(["dominant",
                                                                       "subdominant"]))
-    phrases = []
-    phrases += _theme_group("A", "theme", key, 16, prof, rng, tx, 0.5, prof.words.get("theme", ""))
-    phrases += _theme_group("B", "contrast", b_key, 16, prof, rng, tx, 0.65)
-    for p in list(phrases[:2]):
-        phrases.append(_phr("A'", "return", p.kind, p.bars, key, p.cadence, 0.55, "waltz",
-                            recall=phrases.index(p), variation="ornament",
-                            new_section=(p is phrases[0])))
-    phrases.append(_phr("coda", "closing", "closing", 8 if bars >= 48 else 4, key, "PAC", 0.6,
-                        "waltz", new_section=True))
-    return FormPlan("waltz", phrases)
+    strain = 8 if bars < 44 else 16
+    ph: list[PhraseSpec] = []
+    ph += _theme_group("A", "theme", key, strain, prof, rng, tx, 0.5,
+                       prof.words.get("theme", ""), short=strain <= 8)
+    refrain = list(range(len(ph)))
+    ph += _theme_group("B", "contrast", b_key, strain, prof, rng, tx, 0.65, short=strain <= 8)
+
+    def again(name: str, energy: float, variation: str) -> None:
+        for j, src in enumerate(refrain):
+            p = ph[src]
+            ph.append(_phr(name, "return", p.kind, p.bars, key, p.cadence, energy, "waltz",
+                           recall=src, variation=variation, new_section=(j == 0)))
+
+    again("A'", 0.55, "ornament")
+    if bars >= 72:
+        c_key = _related(key, "subdominant" if not key.is_minor else "parallel")
+        ph += _theme_group("C", "contrast", c_key, strain, prof, rng, tx, 0.6)
+        again("A''", 0.65, "ornament")
+    ph.append(_phr("coda", "closing", "closing", 8 if bars >= 48 else 4, key, "PAC", 0.6,
+                   "waltz", new_section=True))
+    return FormPlan("waltz", ph)
 
 
-def _mazurka(prof: Profile, key: Key, bars: int, rng: random.Random, character: str
+def _mazurka(prof: Profile, key: Key, bars: int, rng: random.Random, character: str, **_
              ) -> FormPlan:
     plan = _waltz(prof, key, bars, rng, character)
     plan.genre = "mazurka"
     return plan
 
 
-def _sonata(prof: Profile, key: Key, bars: int, rng: random.Random, character: str
+def _sonata(prof: Profile, key: Key, bars: int, rng: random.Random, character: str, **_
             ) -> FormPlan:
-    """An exposition with two key areas, a development and a recapitulation."""
+    """An exposition with two key areas, a development and a recapitulation,
+    sized to the piece: a sonatina's small periods and short development, a
+    movement's eight-bar themes, or a large movement's sixteen-bar theme
+    groups and a development that travels through several keys."""
     tx: dict = {}
     s_key = _related(key, "dominant" if not key.is_minor else "relative")
+    if bars < 48:
+        group, tr, k, dev, rt, coda = 8, 0, 0, 4, 0, 4
+    elif bars < 90:
+        group, tr, k, dev, rt, coda = 8, 4, 4, 8, 4, 4
+    elif bars < 140:
+        group, tr, k, dev, rt, coda = 16, 8, 8, 16, 8, 8
+    else:
+        group, tr, k, dev, rt, coda = 16, 8, 8, 32, 8, 8
     ph: list[PhraseSpec] = []
-    ph += _theme_group("P", "theme", key, 8, prof, rng, tx, 0.55)
-    ph.append(_phr("TR", "transition", "development", 4, key, "HC", 0.7,
-                   _tex(prof, "contrast", rng, tx)))
-    ph[-1].key = s_key
+    ph += _theme_group("P", "theme", key, group, prof, rng, tx, 0.55, short=group <= 8 and
+                       bars < 48)
+    p_idx = list(range(len(ph)))
+    if tr:
+        ph.append(_phr("TR", "transition", "development", tr, s_key, "HC", 0.7,
+                       _tex(prof, "contrast", rng, tx)))
     s_start = len(ph)
-    ph += _theme_group("S", "contrast", s_key, 8, prof, rng, tx, 0.5)
-    ph.append(_phr("K", "closing", "closing", 4, s_key, "PAC", 0.65,
-                   _tex(prof, "closing", rng, tx)))
-    dev_key = _related(key, "relative" if not key.is_minor else "subdominant")
-    ph.append(_phr("Dev", "development", "development", 8, dev_key, "HC", 0.85,
-                   _tex(prof, "contrast", rng, tx), new_section=True))
-    ph.append(_phr("Dev", "transition", "development", 4, key, "HC", 0.9,
-                   _tex(prof, "contrast", rng, tx)))
-    ph.append(_phr("P'", "return", ph[0].kind, ph[0].bars, key, "PAC", 0.55, ph[0].texture,
-                   recall=0, new_section=True))
-    ph.append(_phr("S'", "return", ph[s_start].kind, ph[s_start].bars, key, "PAC", 0.55,
-                   ph[s_start].texture, recall=s_start, variation="transpose"))
-    ph.append(_phr("coda", "closing", "closing", 4, key, "PAC", 0.6,
+    ph += _theme_group("S", "contrast", s_key, group, prof, rng, tx, 0.5, short=group <= 8 and
+                       bars < 48)
+    s_idx = list(range(s_start, len(ph)))
+    if k:
+        ph.append(_phr("K", "closing", "closing", k, s_key, "PAC", 0.65,
+                       _tex(prof, "closing", rng, tx)))
+    dev_keys = [_related(key, "relative" if not key.is_minor else "subdominant"),
+                _related(key, "subdominant" if not key.is_minor else "submediant"),
+                _related(key, "submediant" if not key.is_minor else "relative"),
+                _related(key, "parallel")]
+    for i in range(max(1, dev // 8)):
+        ph.append(_phr("Dev", "development", "development", min(8, dev), dev_keys[i % 4],
+                       "HC", 0.8 + 0.05 * min(i, 2), _tex(prof, "contrast", rng, tx),
+                       new_section=(i == 0)))
+    if rt:
+        ph.append(_phr("Dev", "transition", "development", rt, key, "HC", 0.9,
+                       _tex(prof, "contrast", rng, tx)))
+    for j, src in enumerate(p_idx):
+        p = ph[src]
+        ph.append(_phr("P'", "return", p.kind, p.bars, key, "PAC" if j == len(p_idx) - 1
+                       else p.cadence, 0.55, p.texture, recall=src, new_section=(j == 0)))
+    for j, src in enumerate(s_idx):
+        p = ph[src]
+        ph.append(_phr("S'", "return", p.kind, p.bars, key, "PAC" if j == len(s_idx) - 1
+                       else p.cadence, 0.55, p.texture, recall=src, variation="transpose"))
+    ph.append(_phr("coda", "closing", "closing", coda, key, "PAC", 0.6,
                    _tex(prof, "closing", rng, tx), new_section=True))
     return FormPlan("sonata", ph)
 
 
-def _minuet(prof: Profile, key: Key, bars: int, rng: random.Random, character: str
+def _minuet(prof: Profile, key: Key, bars: int, rng: random.Random, character: str, **_
             ) -> FormPlan:
     tx: dict = {}
     tex = _tex(prof, "theme", rng, tx)
@@ -377,23 +553,29 @@ def _minuet(prof: Profile, key: Key, bars: int, rng: random.Random, character: s
     return FormPlan("minuet", ph)
 
 
-def _invention(prof: Profile, key: Key, bars: int, rng: random.Random, character: str
+def _invention(prof: Profile, key: Key, bars: int, rng: random.Random, character: str, **_
                ) -> FormPlan:
+    """The subject alone, answered in the other hand; episodes that carry it
+    through related keys — more of them in a longer piece — and the subject
+    home again."""
     tx: dict = {}
     tex = _tex(prof, "theme", rng, tx)
     other = _related(key, "dominant" if not key.is_minor else "relative")
-    # the subject alone, then answered in the other hand an octave lower
     lead = "imitation" if tex == "walking" else tex
-    ph = [
-        _phr("A", "theme", "sentence", 8, key, "HC", 0.5, lead, new_section=True),
-        _phr("A", "development", "continuation", 8, other, "PAC", 0.6, tex),
-        _phr("B", "development", "development", 8, _related(key, "submediant"), "PAC", 0.7, tex),
-        _phr("A'", "return", "sentence", 8, key, "PAC", 0.6, lead, recall=0),
-    ]
+    keys = [other, _related(key, "submediant"), _related(key, "subdominant"),
+            _related(key, "relative" if not key.is_minor else "dominant")]
+    episodes = max(2, min(8, round((bars - 16) / 8)))
+    ph = [_phr("A", "theme", "sentence", 8, key, "HC", 0.5, lead, new_section=True),
+          _phr("A", "development", "continuation", 8, other, "PAC", 0.6, tex)]
+    for i in range(episodes - 1):
+        ph.append(_phr("B", "development", "development", 8, keys[(i + 1) % len(keys)], "PAC",
+                       0.65 + 0.05 * min(i, 3), tex, new_section=(i == 0)))
+    ph.append(_phr("A'", "return", "sentence", 8, key, "PAC", 0.6, lead, recall=0,
+                   new_section=True))
     return FormPlan("invention", ph)
 
 
-def _etude(prof: Profile, key: Key, bars: int, rng: random.Random, character: str
+def _etude(prof: Profile, key: Key, bars: int, rng: random.Random, character: str, **_
            ) -> FormPlan:
     plan = _ternary(prof, key, bars, rng, character)
     for p in plan.phrases:
@@ -404,7 +586,7 @@ def _etude(prof: Profile, key: Key, bars: int, rng: random.Random, character: st
     return plan
 
 
-def _continuation(prof: Profile, key: Key, bars: int, rng: random.Random, character: str
+def _continuation(prof: Profile, key: Key, bars: int, rng: random.Random, character: str, **_
                   ) -> FormPlan:
     """Carrying on from a piece that is already written: its theme developed
     away from home, a passage leading back, the theme restated and closed,
@@ -430,7 +612,7 @@ def _continuation(prof: Profile, key: Key, bars: int, rng: random.Random, charac
     return FormPlan("continuation", ph)
 
 
-def _concerto(prof: Profile, key: Key, bars: int, rng: random.Random, character: str
+def _concerto(prof: Profile, key: Key, bars: int, rng: random.Random, character: str, **_
               ) -> FormPlan:
     """A concerto first movement: an opening, the first theme, a passage to
     the second key and a lyrical second theme passed between piano and
@@ -481,11 +663,228 @@ def _concerto(prof: Profile, key: Key, bars: int, rng: random.Random, character:
                    variation="octaves" if prof.octave_climax else "", new_section=True,
                    forces="tutti", words=words.get("climax", "")))
     ph.append(_phr("Cad", "cadenza", "development", 8 if bars >= 96 else 4, key, "HC", 0.9,
-                   "sweep16" if prof.harmony != "baroque" else "walking",
-                   new_section=True, forces="cadenza", variation="octaves", words="Cadenza"))
+                   "sustained" if prof.harmony != "baroque" else "walking",
+                   new_section=True, forces="cadenza", variation="runs", words="Cadenza"))
     ph.append(_phr("coda", "closing", "closing", 4, key, "PAC", 0.95,
                    _tex(prof, "climax", rng, tx), new_section=True, forces="tutti"))
     return FormPlan("concerto", ph)
+
+
+def _rondo(prof: Profile, key: Key, bars: int, rng: random.Random, character: str, **_
+           ) -> FormPlan:
+    """A refrain that keeps coming home between episodes — A B A C A and a
+    coda. The refrain is a period in the home key; the first episode moves
+    to the dominant (the relative major in minor) with a theme of its own,
+    the second somewhere darker with another; each episode leads back over
+    a dominant pedal, and the refrain's last return is its fullest."""
+    tx: dict = {}
+    minor = key.is_minor
+    big = bars >= 72
+    words = prof.words
+    b_key = _related(key, "relative" if minor else "dominant")
+    c_key = _related(key, "subdominant" if minor else rng.choice(["relative", "parallel"]))
+    ph: list[PhraseSpec] = []
+    ph += _theme_group("A", "theme", key, 16 if big else 8, prof, rng, tx, 0.55,
+                       words=words.get("theme", ""), short=not big)
+    refrain = list(range(len(ph)))
+    ctex = _tex(prof, "contrast", rng, tx)
+    for section, ekey, energy in (("B", b_key, 0.6), ("C", c_key, 0.7)):
+        ph.append(_phr(section, "contrast", "sentence", 8, ekey, "PAC", energy, ctex,
+                       new_section=True, words=words.get("contrast", "") if section == "C"
+                       else ""))
+        if big:
+            ph.append(_phr(section, "contrast", "continuation", 8, ekey, "PAC", energy + 0.05,
+                           ctex))
+        ph.append(_phr(section, "transition", "development", 4, key, "HC", energy + 0.15,
+                       ctex))
+        last_return = section == "C"
+        for j, src in enumerate(refrain):
+            p = ph[src]
+            variation = ("octaves" if prof.octave_climax else "ornament") if last_return \
+                else ("ornament" if prof.ornaments >= 0.2 else "")
+            ph.append(_phr("A'" if not last_return else "A''",
+                           "climax" if last_return and prof.octave_climax else "return",
+                           p.kind, p.bars, key, p.cadence, 0.8 if last_return else 0.55,
+                           _tex(prof, "climax" if last_return and prof.octave_climax
+                                else "return", rng, tx),
+                           recall=src, variation=variation, new_section=(j == 0)))
+    ph.append(_phr("coda", "closing", "closing", 8 if big else 4, key, "PAC", 0.75,
+                   _tex(prof, "closing", rng, tx), new_section=True))
+    return FormPlan("rondo", ph)
+
+
+def _fragment(prof: Profile, key: Key, bars: int, rng: random.Random, character: str,
+              scope: str = "theme", **_) -> FormPlan:
+    """Part of a piece, as asked: a motif, a phrase, a theme, an
+    introduction, a cadenza or a chord progression — each complete in
+    itself and ready to be built on."""
+    tx: dict = {}
+    tex = _tex(prof, "theme", rng, tx)
+    words = prof.words.get("theme", "")
+    ph: list[PhraseSpec] = []
+    if scope == "motif":
+        ph.append(_phr("A", "theme", "motif", max(1, min(bars, 8)), key,
+                       "none" if bars <= 2 else "PAC", 0.5, tex, new_section=True,
+                       words=words))
+    elif scope == "phrase" and bars <= 8:
+        ph.append(_phr("A", "theme", "sentence", max(2, bars), key, "PAC", 0.5, tex,
+                       new_section=True, words=words))
+    elif scope in ("phrase", "theme"):
+        ph += _theme_group("A", "theme", key, max(4, bars), prof, rng, tx, 0.5, words=words,
+                           short=bars <= 8)
+    elif scope == "introduction":
+        if bars >= 6:
+            ph.append(_phr("intro", "intro", "intro", 2, key, "none", 0.35,
+                           tex if tex in _INTRO_TEXTURES else "sustained", new_section=True))
+        ph.append(_phr("A", "theme", "antecedent", bars - 2 if bars >= 6 else max(2, bars),
+                       key, "HC", 0.45, tex, new_section=not ph, words=words))
+    elif scope == "cadenza":
+        ph.append(_phr("Cad", "cadenza", "development", max(4, bars), key, "HC", 0.9,
+                       "sustained" if prof.harmony != "baroque" else "walking",
+                       new_section=True, variation="runs", words="Cadenza"))
+    else:   # a chord progression
+        ph.append(_phr("A", "theme", "progression", max(2, bars), key, "PAC", 0.5, "chorale",
+                       new_section=True))
+    return FormPlan(scope, ph)
+
+
+#: The kinds of variation each idiom reaches for, in the order a set uses
+#: them: the first is always a figuration, the last the finale.
+_PROGRAMMES = {
+    "classical": ["figural", "accomp", "minore", "triplets", "tenor", "adagio", "finale"],
+    "baroque": ["figural", "walking", "minore", "triplets", "finale"],
+    "romantic": ["triplets", "tenor", "agitato", "minore", "lento", "finale"],
+}
+
+_ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"]
+
+_THEME_NAME = {"it": "Tema", "de": "Thema", "fr": "Thème"}
+
+
+def _choose_variations(programme: list[str], n: int) -> list[str]:
+    """``n`` kinds of variation from a programme: the first figuration, the
+    change of mode near the middle, the slow variation just before the
+    finale, and the finale last."""
+    first, last = programme[0], programme[-1]
+    slow = next((k for k in programme if k in ("adagio", "lento")), None)
+    middle = [k for k in programme[1:-1] if k != slow]
+    body: list[str] = []
+    room = n - 2 - (1 if slow and n >= 5 else 0)
+    pool = list(middle)
+    while len(body) < room:
+        kind = pool[len(body) % len(pool)]
+        # the change of mode happens once
+        body.append(kind if kind != "minore" or "minore" not in body else pool[0])
+    if "minore" in programme and "minore" not in body and room >= 1:
+        body[len(body) // 2] = "minore"
+    out = [first] + body + ([slow] if slow and n >= 5 else []) + [last]
+    return out[:max(2, n)]
+
+
+def _variations(prof: Profile, key: Key, bars: int, rng: random.Random, character: str,
+                count: int = 5, long_theme: bool = False, **_) -> FormPlan:
+    """A theme and variations. The theme is a period — a phrase that pauses
+    on the dominant and one that answers it and closes — and every variation
+    keeps its phrases, cadences and chords while changing what the ear
+    notices first: a figuration that decorates each note of the tune, a
+    running accompaniment, the change of mode, the tune in the tenor, a slow
+    ornamented variation, a finale; then a coda."""
+    tx: dict = {}
+    idiom = "romantic" if prof.harmony in ("romantic", "russian", "film", "impressionist") \
+        else "baroque" if prof.harmony == "baroque" else "classical"
+    romantic = idiom == "romantic"
+    half = 8 if long_theme else 4
+    n = max(2, min(12, count))
+    kinds = _choose_variations(_PROGRAMMES[idiom], n)
+    tex = _tex(prof, "theme", rng, tx)
+    lang = prof.language if prof.language in _THEME_NAME else "it"
+    words = prof.words
+    ph: list[PhraseSpec] = [
+        _phr(_THEME_NAME[lang], "theme", "antecedent", half, key, "HC", 0.4, tex,
+             new_section=True, words=words.get("theme", "")),
+        _phr(_THEME_NAME[lang], "theme", "consequent", half, key, "PAC", 0.45, tex),
+    ]
+    busy = {"classical": "alberti", "baroque": "walking",
+            "romantic": "sweep16" if prof.octave_climax else "sweep"}[idiom]
+    plain = "block" if tex in ("alberti", "sweep", "sweep16") else tex
+    other = parallel_key_of(key)
+    scale = 1.0
+    used: set[tuple[str, str]] = set()
+    spare = [t for ts in prof.textures.values() for t in ts
+             if t not in ("tenor", "imitation", "fugato", "final")]
+    for v, kind in enumerate(kinds):
+        name = f"Var. {_ROMAN[v]}" if v < len(_ROMAN) else f"Var. {v + 1}"
+        vkey, variation, texture, energy, wds, role = key, "", tex, 0.5, "", "variation"
+        register, tempo_words, new_scale = "", "", 1.0
+        if kind == "figural":
+            variation, texture, energy = "figural", plain, 0.5
+            wds = "leggiero" if romantic else ""
+        elif kind == "triplets":
+            # chords under running triplets: no three against two
+            variation, texture, energy = "figural3", "block" if romantic else plain, 0.55
+            wds = "dolce" if romantic else ""
+        elif kind == "accomp":
+            variation, texture, energy = ("ornament" if prof.ornaments >= 0.2 else ""), busy, 0.55
+        elif kind == "walking":
+            texture, energy = "walking", 0.55
+        elif kind == "minore":
+            vkey, variation = other, "minore" if not key.is_minor else "maggiore"
+            texture = "repeated" if romantic else ("block" if tex == "alberti" else tex)
+            energy = 0.45
+            wds = "Minore" if not key.is_minor else "Maggiore"
+        elif kind == "tenor":
+            variation, register, texture, energy = "tenor", "tenor", "tenor", 0.45
+            wds = "cantabile"
+        elif kind == "agitato":
+            variation, texture, energy, wds = "octaves", busy, 0.8, "agitato"
+        elif kind in ("adagio", "lento"):
+            variation, energy = "ornament", 0.3
+            texture = "nocturne" if romantic else ("alberti" if tex != "alberti" else "repeated")
+            new_scale = 0.6
+            tempo_words = {"it": "Adagio" if not romantic else "Lento", "de": "Langsam",
+                           "fr": "Lent"}[lang]
+            wds = "espressivo"
+        elif kind == "finale":
+            if romantic:
+                role, variation, energy = "climax", "octaves", 0.95
+                texture = _tex(prof, "climax", rng, tx)
+                wds = "maestoso"
+            else:
+                variation, texture, energy = "figural", "block" if idiom == "classical" \
+                    else "walking", 0.8
+                new_scale = 1.25
+                tempo_words = {"it": "Allegro", "de": "Rasch", "fr": "Vif"}[lang]
+        if (kind, texture) in used and register != "tenor":
+            # a kind heard before comes back in another dress
+            fresh = [t for t in spare if (kind, t) not in used]
+            if fresh:
+                texture = rng.choice(fresh)
+        used.add((kind, texture))
+        if new_scale != scale and not tempo_words:
+            tempo_words = "Tempo I"
+        scale = new_scale
+        for j in range(2):
+            src = ph[j]
+            ph.append(_phr(name, role, src.kind, src.bars, vkey, src.cadence,
+                           energy + 0.05 * j, texture, recall=j, variation=variation,
+                           new_section=(j == 0), words=wds if j == 0 else "",
+                           register=register, tempo_scale=new_scale,
+                           tempo_words=tempo_words if j == 0 else ""))
+    # the coda: the finale's energy carried home, or — in a Romantic set —
+    # the theme remembered quietly
+    if romantic:
+        ph.append(_phr("Coda", "closing", "closing", 4 if not long_theme else 8, key, "plagal",
+                       0.25, _tex(prof, "closing", rng, tx), new_section=True,
+                       tempo_scale=1.0, tempo_words="Tempo I" if scale != 1.0 else ""))
+    else:
+        ph.append(_phr("Coda", "closing", "closing", 4 if not long_theme else 8, key, "PAC",
+                       0.85, ph[-1].texture, new_section=True, tempo_scale=scale))
+    return FormPlan("variations", ph)
+
+
+def parallel_key_of(key: Key) -> Key:
+    from .variation import parallel_key
+    return parallel_key(key)
 
 
 _TEMPLATES = {
@@ -493,4 +892,5 @@ _TEMPLATES = {
     "concerto": _concerto,
     "prelude": _ternary, "nocturne": _ternary, "waltz": _waltz, "mazurka": _mazurka,
     "sonata": _sonata, "minuet": _minuet, "invention": _invention, "etude": _etude,
+    "variations": _variations, "rondo": _rondo,
 }

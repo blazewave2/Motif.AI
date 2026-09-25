@@ -190,7 +190,8 @@ def harmonize_score(existing: Score, style_name: str, *, quality: str = "best",
         h = harmony_at(harmonies, on)
         rh.add(Note(on, d, [spell(midi, h)]))
     group_tuplets(rh.notes)
-    ctx = TextureContext(time, bar, beat, key, bass_low=prof.bass_low, rng=rng)
+    ctx = TextureContext(time, bar, beat, key, bass_low=prof.bass_low, rng=rng,
+                         grand=prof.harmony not in ("classical", "baroque"))
     lows, highs = {}, {}
     t = F(0)
     while t < bar * bars:

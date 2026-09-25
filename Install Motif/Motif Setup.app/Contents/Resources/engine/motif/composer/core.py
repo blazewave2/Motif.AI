@@ -21,15 +21,18 @@ from ..notation.to_score import to_score
 from ..plan import CompositionPlan
 from ..score import Score
 from ..theory.pitch import Key, Pitch
-from .form import FormPlan, PhraseSpec, choose_metre, detect_genre, genre_family, plan_form
+from .form import (SCOPE_BARS, FormPlan, PhraseSpec, choose_metre, detect_genre, detect_scope,
+                   genre_family, melody_only, plan_form)
 from .harmony import (Harmony, PhraseHarmonySpec, harmony_at, harmony_style, plan_phrase,
                       revise, spell)
-from .melody import (MelNote, Motif, MelodyWriter, PhrasePlan, _random_motif, implied_harmony,
+from .melody import (GENRE_CELLS, MelNote, Motif, MelodyWriter, PhrasePlan, _random_motif,
+                     implied_harmony,
                      invent_motif, melody_style, motif_score, respell_line, roles_for)
 from .notation import (BarInfo, Mark, Note, Sheet, Voice, bar_length, beat_length,
                        group_tuplets as _group_tuplets)
-from .profiles import Profile, choose_tempo, profile
+from .profiles import Profile, choose_tempo, named_composer, profile
 from .texture import TexNote, TextureContext, final_chord, realise
+from .variation import change_mode, figurate, to_tenor
 from . import arrange as _arrange
 
 
@@ -86,14 +89,36 @@ class Composer:
         self.progress = progress
         self.rng = random.Random(plan.seed if seed is None else seed)
         self.prof: Profile = profile(plan.style)
+        self.display = self.prof.display
+        named = named_composer(plan.prompt or "")
+        if named is not None and named[0] != self.prof.name and \
+                plan.style.lower() not in (plan.prompt or "").lower():
+            # a composer without a profile of their own writes through their kin
+            self.prof, self.display = profile(named[0]), named[1]
+        elif named is not None and named[0] == self.prof.name:
+            self.display = named[1]
         self.key = Key.parse(plan.key)
+        #: the part of a piece asked for (a motif, a theme …), if only a part
+        self.scope = None if form else detect_scope(plan.prompt or "")
+        #: the tune alone, with no accompaniment
+        self.melody_only = melody_only(plan.prompt or "")
         self.genre = form or detect_genre(plan.prompt) or plan.form
+        if genre_family(self.genre) == "concerto" and \
+                (getattr(plan, "ensemble", None) or "solo_piano") != "piano_concerto":
+            self.genre = "ternary"             # only a piano concerto is written as one
         self.family = genre_family(self.genre)
-        _retitle(plan, self.genre, named=bool(detect_genre(plan.prompt)) and not form)
+        low = (plan.prompt or "").lower()
+        scope_word = self.scope
+        if self.scope == "theme":
+            scope_word = "melody" if "melody" in low else "tune" if "tune" in low else "theme"
+        _retitle(plan, scope_word or self.genre,
+                 named=(bool(detect_genre(plan.prompt)) or bool(self.scope)) and not form)
         if getattr(plan, "time_given", False) or not plan.prompt:
             self.time = tuple(plan.time)
+        elif self.scope in ("cadenza", "progression"):
+            self.time = (4, 4)
         else:
-            self.time = choose_metre(self.family, self.prof, self.rng)
+            self.time = choose_metre(self.family, self.prof, self.rng, self.genre)
         self.bar = bar_length(self.time)
         self.beat = beat_length(self.time)
         self.notes: list[str] = []
@@ -105,15 +130,36 @@ class Composer:
         if getattr(plan, "tempo_given", False):
             self.tempo, self.tempo_text = plan.tempo, plan.tempo_text
         else:
-            words, bpm = choose_tempo(self.prof, self.family, plan.character, self.rng)
+            words, bpm = choose_tempo(self.prof, self.family, plan.character, self.rng,
+                                      self.genre)
             if self.beat == F(3, 2):
                 bpm = round(bpm * 0.72)
             elif self.beat == F(2):
                 bpm = round(bpm * 0.6)
             self.tempo, self.tempo_text = bpm, words
+            if self.scope == "cadenza":
+                self.tempo, self.tempo_text = 96, "Liberamente"
         self._last_dyn: str | None = None
+        self._figures: set = set()               # figurations the variations have used
         #: a piece for a learner: plain rhythms, an easy left hand, no ornaments
         self.simple = "simplified" in (plan.notes or "")
+
+    def _fit_section_tempi(self, form: FormPlan) -> None:
+        """A section marked slower or quicker than the piece is taken at a
+        tempo that makes sense from where the piece starts: a slow variation
+        of a theme that is already slow only holds back a little, and a
+        quick one never runs away."""
+        base = float(self.tempo) * float(self.beat)          # quarter notes a minute
+        for p in form.phrases:
+            if p.tempo_scale < 1:
+                slow = max(base * p.tempo_scale, min(base * 0.85, 52.0))
+                p.tempo_scale = round(slow / base, 2)
+                if p.tempo_scale >= 0.8 and p.tempo_words:
+                    p.tempo_words = {"it": "Più lento", "de": "Langsamer",
+                                     "fr": "Plus lent"}.get(self.prof.language, "Più lento")
+            elif p.tempo_scale > 1:
+                quick = min(base * p.tempo_scale, max(base * 1.1, 152.0))
+                p.tempo_scale = round(quick / base, 2)
 
     def _say(self, stage: str, label: str, detail: str, fraction: float) -> None:
         report(self.progress, Progress(stage, label, detail, fraction))
@@ -130,8 +176,26 @@ class Composer:
     def _compose(self) -> Score:
         plan, prof = self.plan, self.prof
         self._say("planning", "Planning the form", "", 0.02)
-        target = getattr(plan, "length_bars", 0) or plan.total_bars or 48
-        form = plan_form(self.genre, prof, self.key, target, self.rng, plan.character)
+        target = getattr(plan, "length_bars", 0) or getattr(plan, "size_bars", 0) or \
+            plan.total_bars or 48
+        options: dict = {}
+        if self.scope:
+            given = getattr(plan, "length_bars", 0)
+            short = any(w in (plan.prompt or "").lower() for w in ("short", "brief", "tiny"))
+            target = given or (SCOPE_BARS[self.scope] // (2 if short and self.scope not in
+                                                          ("motif", "introduction") else 1))
+            options = {"scope": self.scope}
+        elif self.family == "variations":
+            count, large = _variations_asked(plan.prompt or "")
+            if getattr(plan, "length_bars", 0):
+                large = target >= 96
+                count = count or max(2, round((target - 4) / (16 if large else 8)) - 1)
+            options = {"count": count or (4 if large else 5), "long_theme": large}
+        form = plan_form(self.genre, prof, self.key, target, self.rng, plan.character,
+                         **options)
+        if getattr(plan, "length_bars", 0) and not self.scope and self.family != "variations":
+            _fit_length(form, plan.length_bars)
+        self._fit_section_tempi(form)
         if self.simple:
             form = _simplify(form, prof)
         if self.ensemble != "solo_piano":
@@ -140,8 +204,15 @@ class Composer:
                 if p.register == "tenor" or p.texture == "tenor":
                     p.register = ""
                     p.texture = (prof.textures.get("contrast") or ["block"])[0]
+                if p.variation == "tenor":
+                    p.variation = ""
         hstyle = harmony_style(prof.harmony)
         mstyle = melody_style(prof.melody)
+        cells = next((c for g, c in GENRE_CELLS.items() if g in self.genre.lower()), None)
+        if cells:
+            # a march, a polonaise, a gigue has a rhythm of its own
+            from dataclasses import replace as _replace
+            mstyle = _replace(mstyle, cells=cells)
 
         self._say("themes", "Inventing the themes" if self.theme is None else
                   "Listening to your theme", "", 0.06)
@@ -154,6 +225,11 @@ class Composer:
             "A": MelodyWriter(mstyle, motif, self.rng, beam=self.care.beam, time=self.time),
             "B": MelodyWriter(mstyle, contrast, self.rng, beam=self.care.beam, time=self.time),
         }
+        if any(p.role == "contrast" and p.section == "C" for p in form.phrases):
+            # a rondo's second episode has a theme of its own
+            third = invent_contrast(mstyle, motif, self.time, self.rng, self.care.motifs)
+            writers["C"] = MelodyWriter(mstyle, third, self.rng, beam=self.care.beam,
+                                        time=self.time)
         if self.theme is not None:
             writers["A"].theme_bars = [list(b) for b in self.theme.bars]
             writers["A"].theme_key = self.theme.key
@@ -175,14 +251,18 @@ class Composer:
             nxt = form.phrases[i + 1] if i + 1 < n else None
             tail = self._upbeat_of(nxt, written, writers) if nxt is not None else F(0)
             upbeat = self._upbeat_of(ps, written, writers) if written else F(0)
-            writer = writers["B"] if ps.role == "contrast" else writers["A"]
+            writer = _writer_for(ps, writers)
             if ps.recall is not None and ps.recall < len(written):
                 w = self._recall(written[ps.recall], ps, t, written)
             elif ps.kind == "intro":
                 w = self._intro(ps, t, hstyle)
+            elif ps.kind == "progression":
+                w = self._progression(ps, t, hstyle)
             else:
                 w = self._phrase(ps, t, hstyle, mstyle, writer, last_note, written, upbeat,
                                  tail, final=(i == n - 1))
+            if ps.variation == "runs" and w.melody:
+                w.melody = self._runs(w.melody, w.harmony, ps, t)
             if ps.kind in ("antecedent", "sentence") and not writer.theme_bars and \
                     ps.recall is None and w.melody:
                 writer.theme_bars = _by_bar(w.melody, t, self.bar, ps.bars)
@@ -199,6 +279,8 @@ class Composer:
         msn = sheet.to_msn()
         piece = parse_msn(msn)
         score, _issues = to_score(piece)
+        if self.scope == "progression":
+            _chord_symbols(score, written, self.bar)
         score.metadata.update({"style": prof.name, "form": form.genre, "engine": "motif",
                                "seed": plan.seed, "prompt": plan.prompt,
                                "character": plan.character, "ensemble": self.ensemble})
@@ -260,11 +342,16 @@ class Composer:
             sections.append({"name": ps.section, "role": ps.role, "start": start, "end": stop,
                              "key": str(ps.key), "texture": ps.texture, "energy": ps.energy,
                              "words": ps.words, "recall": ps.recall is not None,
-                             "variation": ps.variation, "forces": ps.forces})
+                             "variation": ps.variation, "forces": ps.forces,
+                             "tempo_words": ps.tempo_words, "register": ps.register})
+        progression = [h.roman for w in written for h in w.harmony] \
+            if self.scope == "progression" else []
         return {"genre": self.genre, "family": self.family, "bars": int(end / self.bar),
+                "scope": self.scope, "melody_only": self.melody_only,
+                "progression": progression,
                 "key": str(self.key), "time": tuple(self.time), "tempo": self.tempo,
                 "tempo_text": self.tempo_text, "ensemble": self.ensemble,
-                "style": self.prof.display, "composer": self.prof.name,
+                "style": self.display, "composer": self.prof.name,
                 "sections": sections,
                 "theme": {"notes": len(motif.rhythm) + len(motif.second),
                           "shape": sum(motif.steps), "upbeat": bool(motif.anacrusis),
@@ -278,13 +365,27 @@ class Composer:
         """How long the upbeat into phrase ``ps`` will be (0 if none)."""
         if ps.recall is not None and ps.recall < len(written):
             return written[ps.recall].upbeat
-        if ps.kind == "intro":
+        if ps.kind == "intro" or ps.register == "tenor":
+            # a tune in the left hand starts on its downbeat: the hand is
+            # still busy with the phrase before
             return F(0)
-        writer = writers["B"] if ps.role == "contrast" else writers["A"]
+        writer = _writer_for(ps, writers)
         roles = roles_for(ps.kind, ps.bars)
         if roles and roles[0] in ("idea", "recall:0") and writer.motif.anacrusis:
             return sum(writer.motif.anacrusis, F(0))
         return F(0)
+
+    def _progression(self, ps: PhraseSpec, t: F, hstyle) -> Written:
+        """A chord progression on its own: the harmony of a phrase, planned
+        the way every phrase's harmony is — tonic, answer, predominant,
+        cadence — in the composer's vocabulary, the best of many plans."""
+        spec = PhraseHarmonySpec(key=ps.key, start=t, bars=ps.bars, bar_len=self.bar,
+                                 cadence=ps.cadence, kind="open", beat=self.beat,
+                                 presentation=ps.bars >= 4, response_shift=self.rng.choice(
+                                     [o for o, _ in _RESPONSES.get(self.prof.harmony,
+                                                                   _RESPONSES["romantic"])]))
+        harmony = plan_phrase(spec, hstyle, self.rng, tries=self.care.harmony_tries)
+        return Written(ps, t, harmony, [], [])
 
     def _intro(self, ps: PhraseSpec, t: F, hstyle) -> Written:
         """The accompaniment alone: the tonic, perhaps coloured, over a pedal —
@@ -412,7 +513,10 @@ class Composer:
             semis = (ps.key.tonic_pc - src.spec.key.tonic_pc) % 12
             if semis > 6:
                 semis -= 12
-        harmony = [Harmony(h.roman, ps.key, h.onset + shift, h.dur, pedal=(
+        mode_change = ps.variation in ("minore", "maggiore")
+        # a change of mode is made from the theme as it was, chord by chord
+        hkey = src.spec.key if mode_change else ps.key
+        harmony = [Harmony(h.roman, hkey, h.onset + shift, h.dur, pedal=(
             (h.pedal + semis) % 12 if h.pedal is not None else None), cadence=h.cadence)
             for h in src.harmony]
         if ps.cadence != src.spec.cadence and harmony:
@@ -447,11 +551,115 @@ class Composer:
         for m in melody:
             h = prev_h if (m.onset < t and prev_h is not None) else harmony_at(harmony, m.onset)
             m.pitch = spell(m.midi, h)
-        respell_line([m for m in melody if m.onset >= t], harmony, ps.key)
+        respell_line([m for m in melody if m.onset >= t], harmony, hkey)
+        if mode_change:
+            upbeat = [m for m in melody if m.onset < t]
+            harmony, moved = change_mode(harmony, [m for m in melody if m.onset >= t], hkey,
+                                         ps.key, self.beat)
+            melody = upbeat + moved
+        if ps.variation in ("figural", "figural3"):
+            melody = self._figural(melody, harmony, ps, t)
+        if ps.variation == "tenor" and self.ensemble == "solo_piano":
+            # the tune sings in the left hand, from its own downbeat
+            melody = to_tenor([m for m in melody if m.onset >= t])
         if ps.variation == "ornament":
-            melody = _ornament(melody, harmony, self.rng, self.prof.ornaments, self.beat,
-                               ps.key)
+            amount = self.prof.ornaments
+            if ps.tempo_scale < 1:
+                melody = self._adagio(melody, harmony, ps, t)
+                amount = max(0.3, amount)
+            melody = _ornament(melody, harmony, self.rng, amount, self.beat, ps.key)
+        body = [m for m in melody if m.onset >= t]
+        if ps.role == "climax" and body and self.ensemble == "solo_piano":
+            # the climax sings its theme an octave higher, where it can
+            top = max(m.midi for m in melody)
+            ceiling = melody_style(self.prof.melody).climax_high
+            if top + 12 <= ceiling:
+                for m in melody:
+                    m.midi += 12
+                    m.pitch = Pitch.build(m.pitch.step, m.pitch.alter, m.pitch.octave + 1) \
+                        if m.pitch else m.pitch
+        if self.prof.harmony in ("romantic", "russian") and not mode_change and \
+                ps.role in ("return", "climax", "variation"):
+            harmony = self._recolour(harmony, body, ps)
         return Written(ps, t, harmony, melody, [], upbeat=src.upbeat)
+
+    def _figural(self, melody: list[MelNote], harmony: list[Harmony], ps: PhraseSpec,
+                 t: F) -> list[MelNote]:
+        """The tune in running notes: sixteenths (eighths when the tempo is
+        quick, or in a compound metre), or triplets for a ``figural3``
+        variation; wider, arpeggiating figures for a Romantic."""
+        qbpm = float(self.tempo) * ps.tempo_scale * float(self.beat)
+        compound = self.beat == F(3, 2)
+        if ps.variation == "figural3":
+            unit = F(1, 4) if compound else F(1, 3)
+        else:
+            unit = F(1, 2) if compound or qbpm > 152 else F(1, 4)
+        if unit == F(1, 4) and qbpm > 152:
+            unit = F(1, 2)
+        body = [m for m in melody if m.onset >= t]
+        if not body:
+            return melody
+        mst = melody_style(self.prof.melody)
+        lo = min(m.midi for m in body) - 5
+        hi = min(mst.climax_high, max(m.midi for m in body) + 4)
+        leaps = 0.8 if self.prof.harmony in ("romantic", "russian", "film") else 0.45
+        if ps.role == "climax" or ps.tempo_scale > 1:
+            leaps = min(0.95, leaps + 0.3)       # a finale's figures leap and arpeggiate
+        return figurate(melody, harmony, ps.key, t, unit, self.beat, self.bar, lo, hi, leaps,
+                        avoid=self._figures)
+
+    def _runs(self, melody: list[MelNote], harmony: list[Harmony], ps: PhraseSpec,
+              t: F) -> list[MelNote]:
+        """A cadenza: the phrase's line becomes the skeleton of runs that
+        break every chord and sweep across the keyboard — sextuplets for a
+        virtuoso, sixteenths otherwise — over the held harmony."""
+        body = [m for m in melody if m.onset >= t]
+        if not body:
+            return melody
+        unit = F(1, 6) if (_virtuoso(self.prof) and self.beat == 1) else \
+            F(1, 4) if self.beat != F(3, 2) else F(1, 4)
+        mst = melody_style(self.prof.melody)
+        lo = max(55, min(m.midi for m in body) - 10)
+        hi = max(mst.climax_high, max(m.midi for m in body) + 12)
+        return figurate(melody, harmony, ps.key, t, unit, self.beat, self.bar, lo, hi, 0.9,
+                        avoid=set(), reach=17, sweep=True)
+
+    def _adagio(self, melody: list[MelNote], harmony: list[Harmony], ps: PhraseSpec,
+                t: F) -> list[MelNote]:
+        """A slow variation sings the theme with its long notes held and their
+        last beat decorated on the way to the next — sixteenths at a slow
+        tempo — and grace notes and turns besides."""
+        body = [m for m in melody if m.onset >= t]
+        if not body or self.beat != 1:
+            return melody
+        mst = melody_style(self.prof.melody)
+        lo = min(m.midi for m in body) - 4
+        hi = min(mst.climax_high, max(m.midi for m in body) + 3)
+        return figurate(melody, harmony, ps.key, t, F(1, 4), self.beat, self.bar, lo, hi, 0.4,
+                        avoid=set(), adagio=True, rng=self.rng)
+
+    def _recolour(self, harmony: list[Harmony], melody: list[MelNote], ps: PhraseSpec
+                  ) -> list[Harmony]:
+        """A return is not a copy: some of its chords come back richer —
+        a seventh, an added sixth, a borrowed colour — as long as the tune
+        still fits them."""
+        from .harmony import _alternatives, core as _core, _melody_weights
+        style = harmony_style(self.prof.harmony)
+        out = list(harmony)
+        for i, h in enumerate(harmony[:-2]):
+            if self.rng.random() > 0.35 or "/" in h.roman or h.pedal is not None:
+                continue
+            opts = [a for a in _alternatives(h.roman, ps.key, style)
+                    if _core(a) == _core(h.roman) and a != h.roman and "(" in a + "7"]
+            if not opts:
+                continue
+            alt = Harmony(self.rng.choice(opts), ps.key, h.onset, h.dur, cadence=h.cadence)
+            weights = _melody_weights(melody, h, self.beat)
+            clash_old = sum(w for pc, w in weights if pc not in h.pcs)
+            clash_new = sum(w for pc, w in weights if pc not in alt.pcs)
+            if clash_new <= clash_old:
+                out[i] = alt
+        return out
 
     # ------------------------------------------------------------------
     def _sheet(self, written: list[Written], form: FormPlan, end: F) -> Sheet:
@@ -487,13 +695,19 @@ class Composer:
             _melody_to_voice(lh if ps.register == "tenor" else rh, w.melody, fill, w.harmony,
                              w.start, prev_h)
         _group_tuplets(rh.notes)
+        if self.scope == "cadenza" and rh.notes:
+            # a cadenza comes to rest on a trill over the dominant
+            last = max(rh.notes, key=lambda n: n.onset)
+            if "tr" not in last.marks:
+                last.marks = list(last.marks) + ["tr"]
         # the last melody note becomes a full chord
-        _final_rh_chord(rh, written[-1], final_bar)
+        if not self.melody_only:
+            _final_rh_chord(rh, written[-1], final_bar)
         # a singing inner voice under the tune, where the left hand leaves room
         for w in written:
             ps = w.spec
             if ps.role in ("theme", "return", "contrast") and ps.texture in _LH_ONLY and \
-                    ps.register != "tenor" and \
+                    ps.register != "tenor" and not self.melody_only and \
                     ps.variation != "octaves" and w.melody and \
                     self.rng.random() < prof.inner:
                 rh2.notes.extend(_inner_line(w, self.beat, final_bar))
@@ -506,7 +720,8 @@ class Composer:
                 _melody_to_voice(tenor_lines, w.melody, "", w.harmony, w.start, None)
         ctx = TextureContext(self.time, self.bar, self.beat, self.key,
                              bass_low=prof.bass_low, rng=self.rng, tempo=float(self.tempo),
-                             virtuoso=_virtuoso(prof))
+                             virtuoso=_virtuoso(prof),
+                             grand=prof.harmony not in ("classical", "baroque"))
         ctx.melody_floor, ctx.melody_top = _rh_extent(rh, self.bar, end)
         if tenor_lines.notes:
             t_low, t_top = _rh_extent(tenor_lines, self.bar, end)
@@ -519,17 +734,28 @@ class Composer:
             ctx.key = ps.key
             ctx.energy = ps.energy
             ctx.melody = w.melody
+            ctx.tempo = float(self.tempo) * ps.tempo_scale
             span_end = w.start + self.bar * ps.bars
             last = wi == len(written) - 1
+            if self.melody_only:
+                w.texture = []
+                continue
             tex = realise(ps.texture, w.harmony, w.start, final_bar if last else span_end, ctx)
-            if last:
+            if last and ps.texture == "chorale":
+                tex += realise("chorale", [harmony_at(w.harmony, final_bar)], final_bar,
+                               final_bar + self.bar, ctx)
+            elif last:
                 h = harmony_at(w.harmony, final_bar)
                 tex += final_chord(h, final_bar, self.bar, ctx)
             elif ps.cadence in ("PAC", "HC", "IAC", "plagal") and ps.texture in _FLOWING and \
                     self.rng.random() < 0.45:
                 tex = _breathe(tex, w.harmony, span_end, self.bar, self.beat, ctx)
             w.texture = tex
-            if ps.register == "tenor":
+            if ps.texture == "chorale":
+                # a progression's chords are the right hand's own part
+                _texture_to_voices([n for n in tex if n.staff == "RH"], w.harmony, rh, rh)
+                _texture_to_voices([n for n in tex if n.staff != "RH"], w.harmony, lh, lh)
+            elif ps.register == "tenor":
                 # the right hand is free of the tune: its chords are the upper voice
                 _texture_to_voices([n for n in tex if n.staff == "RH"], w.harmony, rh, rh)
                 _texture_to_voices([n for n in tex if n.staff != "RH"], w.harmony, lh2, lh2)
@@ -539,7 +765,10 @@ class Composer:
         # -- dynamics, words, phrasing and pedalling
         for wi, w in enumerate(written):
             self._mark_phrase(rh, lh, w, first=(wi == 0))
-        self._tempo_changes(sheet, rh, written)
+        if self.family == "variations":
+            self._section_marks(sheet, rh, written)
+        elif not any(g in self.genre.lower() for g in _STEADY):
+            self._tempo_changes(sheet, rh, written)
         _final_marks(rh, lh, rh2, end, self.bar)
         sheet.bar_info.setdefault(bars, BarInfo()).barline = "final"
         sheet.voices = [rh, rh2, lh] + ([lh2] if lh2.notes else [])
@@ -568,9 +797,30 @@ class Composer:
                 if "fermata" not in n.marks:
                     n.marks = list(n.marks) + ["fermata"]
         lead.marks.append(Mark(end - self.bar * 2, "above", "rit."))
+        if self.family == "variations":
+            self._section_marks(sheet, lead, written)
         sheet.bar_info.setdefault(bars, BarInfo()).barline = "final"
         sheet.voices = voices
         return sheet
+
+    def _section_marks(self, sheet: Sheet, lead: Voice, written: list[Written]) -> None:
+        """A set of variations names each section at its head, closes each with
+        a double bar and gives it its own tempo where it has one."""
+        for wi, w in enumerate(written):
+            ps = w.spec
+            if not ps.new_section:
+                continue
+            bar_no = int(w.start / self.bar) + 1
+            info = sheet.bar_info.setdefault(bar_no, BarInfo())
+            info.mark = ps.section
+            if wi:
+                before = sheet.bar_info.setdefault(bar_no - 1, BarInfo())
+                before.barline = before.barline or "double"
+            if ps.tempo_words:
+                info.tempo = round(self.tempo * ps.tempo_scale)
+                info.tempo_text = ps.tempo_words
+                if wi and ps.tempo_scale < written[wi - 1].spec.tempo_scale:
+                    lead.marks.append(Mark(w.start - self.bar, "above", "rit."))
 
     def _key_changes(self, sheet: Sheet, written: list[Written]) -> None:
         prof = self.prof
@@ -581,7 +831,8 @@ class Composer:
                 continue
             bar_no = int(w.start / self.bar) + 1
             home = ps.key == self.key
-            modern = prof.harmony not in ("classical", "baroque") or ps.section in ("Trio",)
+            modern = prof.harmony not in ("classical", "baroque") or ps.section in ("Trio",) or \
+                ps.section.startswith("Var")
             if ps.key.fifths != sig.fifths and (ps.new_section or home) and \
                     (modern or sig.fifths != self.key.fifths):
                 sheet.bar_info.setdefault(bar_no, BarInfo()).key = ps.key
@@ -628,6 +879,9 @@ class Composer:
         dyn = _energy_dynamic(prof, ps.energy)
         if ps.role == "closing" and ps.section == "coda":
             dyn = prof.dynamics[0]
+        elif ps.role == "transition":
+            # a passage leading home starts below where it is going and grows
+            dyn = _energy_dynamic(prof, max(0.3, ps.energy - 0.3))
         if first or ps.new_section or dyn != self._last_dyn:
             (rh if w.melody else lh).marks.append(Mark(at, "dyn", dyn))
             self._last_dyn = dyn
@@ -650,8 +904,10 @@ class Composer:
             if len(after) >= 2:
                 rh.marks.append(Mark(after[0].onset, "dim"))
                 rh.marks.append(Mark(after[-1].onset, "end"))
-        # pedal with every change of harmony
-        if prof.pedal == "harmony":
+        # pedal with every change of harmony (never under a march's detached chords)
+        if ps.texture == "march" or self.melody_only:
+            pass
+        elif prof.pedal == "harmony":
             for h in w.harmony:
                 lh.marks.append(Mark(h.onset, "ped"))
         elif prof.pedal == "sparse" and ps.role in ("closing", "climax"):
@@ -678,7 +934,7 @@ class Composer:
         quick = float(self.tempo) * float(self.beat) >= 108
         if classical and quick:
             for a, b, c in zip(mel, mel[1:], mel[2:]):
-                if b.dur <= self.beat and not (b.slur_start or b.slur_stop) and \
+                if self.beat / 2 <= b.dur <= self.beat and not (b.slur_start or b.slur_stop) and \
                         (abs(b.midi - a.midi) >= 3 or b.midi == a.midi) and \
                         abs(c.midi - b.midi) >= 3 and "stacc" not in b.marks:
                     b.marks = list(b.marks) + ["stacc"]
@@ -753,6 +1009,9 @@ def judge_melody(notes: list[MelNote], plan: PhrasePlan) -> float:
     score -= 0.6 * max(0, 9 - rng)
     durs = {n.dur for n in notes}
     score += 0.5 * min(len(durs), 4)
+    # a long note struck again and again makes a line stand still
+    score -= 1.0 * sum(1 for a, b in zip(notes, notes[1:])
+                       if a.midi == b.midi and a.dur >= 1 and b.dur >= 1)
     last = mids[-1]
     deg = (last - plan.key.tonic_pc) % 12
     if plan.cadence == "PAC" and deg != 0:
@@ -777,11 +1036,89 @@ def prof_pedal(prof: Profile) -> bool:
     return prof.harmony in ("russian", "romantic", "impressionist")
 
 
+#: MusicXML's names for the kinds of chord, and how each is written.
+_SYMBOL_KINDS = {
+    "maj": ("major", ""), "min": ("minor", "m"), "dim": ("diminished", "dim"),
+    "aug": ("augmented", "+"), "dom7": ("dominant", "7"), "maj7": ("major-seventh", "maj7"),
+    "min7": ("minor-seventh", "m7"), "dim7": ("diminished-seventh", "dim7"),
+    "half_dim7": ("half-diminished", "m7b5"), "sus4": ("suspended-fourth", "sus4"),
+    "sus2": ("suspended-second", "sus2"), "six": ("major-sixth", "6"),
+    "min6": ("minor-sixth", "m6"), "min_add6": ("minor-sixth", "m6"),
+    "min_maj7": ("major-minor", "m(maj7)"), "dom9": ("dominant-ninth", "9"),
+    "maj9": ("major-ninth", "maj9"), "min9": ("minor-ninth", "m9"), "add9": ("major", "add9"),
+    "min_add9": ("minor", "m(add9)"), "dom7b9": ("dominant", "7(b9)"),
+    "maj7_add9": ("major-ninth", "maj9"), "dom13": ("dominant-13th", "13"),
+    "aug_maj7": ("augmented-seventh", "+maj7"), "it6": ("Italian", "It+6"),
+    "fr6": ("French", "Fr+6"), "ger6": ("German", "Ger+6"),
+}
+
+
+def _chord_symbols(score: Score, written: list[Written], bar: F) -> None:
+    """Chord names over a progression's chords, as a lead sheet has them."""
+    from ..score import DIVISIONS, ChordSymbol
+    part = score.parts[0]
+    for w in written:
+        for h in w.harmony:
+            index = int(h.onset // bar)
+            if index >= len(part.measures):
+                continue
+            at = int((h.onset - index * bar) * DIVISIONS)
+            pos, target = 0, None
+            for n in part.measures[index].voices.get(1, []):
+                if n.staff != 1 or n.grace:
+                    continue
+                if pos >= at:
+                    target = n
+                    break
+                pos += n.duration
+            if target is None or target.chord_symbol is not None:
+                continue
+            chord = h.chord
+            kind, text = _SYMBOL_KINDS.get(chord.quality, ("major", ""))
+            bass = chord.bass_pitch(3) if chord.inversion else None
+            target.chord_symbol = ChordSymbol(chord.root, kind, bass, text)
+
+
+#: Pieces that keep a steady pulse from section to section.
+_STEADY = ("march", "marche", "gigue", "toccata", "tarantella", "gavotte")
+
+
+def _writer_for(ps: PhraseSpec, writers: dict) -> MelodyWriter:
+    """Whose theme a phrase is written from: the main theme's, the
+    contrasting theme's — or, in a rondo's second episode, a third."""
+    if ps.role == "contrast":
+        return writers["C"] if ps.section == "C" and "C" in writers else writers["B"]
+    return writers["A"]
+
+
+_COUNTS = {"two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
+           "nine": 9, "ten": 10, "eleven": 11, "twelve": 12}
+
+
+def _variations_asked(prompt: str) -> tuple[int, bool]:
+    """What a request for variations asks: how many (0 when it doesn't say;
+    three for a short set) and whether the set is a large one, on a
+    sixteen-bar theme."""
+    import re
+    text = prompt.lower()
+    large = any(w in text for w in ("long", "extended", "full", "complete", "grand", "large",
+                                    "substantial", "big"))
+    m = re.search(r"\b(\d{1,2}|" + "|".join(_COUNTS) + r")\s+variations?\b", text)
+    if m:
+        n = int(m.group(1)) if m.group(1).isdigit() else _COUNTS[m.group(1)]
+        return max(2, min(12, n)), large
+    if any(w in text for w in ("short", "brief", "little", "small", "simple", "easy",
+                               "quick")):
+        return 3, False
+    return 0, large
+
+
 def _label(ps: PhraseSpec) -> str:
     return {"theme": "Writing the theme", "contrast": "Writing the middle section",
             "climax": "Building the climax", "return": "Bringing the theme back",
             "closing": "Writing the coda", "transition": "Leading back",
-            "development": "Developing the material", "intro": "Setting the scene"
+            "development": "Developing the material", "intro": "Setting the scene",
+            "variation": f"Writing {ps.section}"
             }.get(ps.role, "Writing")
 
 
@@ -802,6 +1139,45 @@ def _by_bar(notes: list[MelNote], start: F, bar: F, bars: int) -> list[list[MelN
         if 0 <= b < bars:
             out[b].append(n)
     return out
+
+
+def _fit_length(form: FormPlan, target: int) -> None:
+    """A piece asked for at a length is written at that length: an
+    introduction gives way and the coda shortens when the plan runs long,
+    and the coda grows when it runs short."""
+    def total() -> int:
+        return sum(p.bars for p in form.phrases)
+
+    for i in [i for i, p in enumerate(form.phrases) if p.kind == "intro"][::-1]:
+        if total() <= target:
+            break
+        _drop_phrase(form, i)
+    codas = [p for p in form.phrases if p.role == "closing"]
+    for p in codas[::-1]:
+        while p.bars > 2 and total() > target:
+            p.bars -= 2 if p.bars > 4 or total() - target >= 2 else 1
+    if total() > target and len(form.phrases) > 2 and form.phrases[-1].role == "closing" and \
+            total() - form.phrases[-1].bars >= target - 1:
+        # a short piece can end with its return, closing on the tonic
+        _drop_phrase(form, len(form.phrases) - 1)
+        if form.phrases[-1].cadence not in ("PAC", "plagal"):
+            form.phrases[-1].cadence = "PAC"
+    if total() > target:
+        for i in [i for i, p in enumerate(form.phrases) if p.role == "transition"][::-1]:
+            if total() - form.phrases[i].bars >= target - 2:
+                _drop_phrase(form, i)
+            if total() <= target:
+                break
+    if total() < target and codas:
+        coda = codas[-1]
+        coda.bars += min(target - total(), max(0, 12 - coda.bars))
+
+
+def _drop_phrase(form: FormPlan, i: int) -> None:
+    del form.phrases[i]
+    for p in form.phrases:
+        if p.recall is not None:
+            p.recall = None if p.recall == i else (p.recall - 1 if p.recall > i else p.recall)
 
 
 _EASY_TEXTURES = {"alberti": "alberti", "waltz": "waltz", "block": "block",
@@ -1044,7 +1420,11 @@ def _inner_line(w: Written, beat: F, stop: F) -> list[Note]:
         if nxt is not None and m % 12 not in nxt.pcs and dur >= 2 * beat and nxt.end - nxt.onset >= 2 * beat:
             res = [x for x in (m - 1, m - 2) if x % 12 in nxt.pcs]
             nxt_over = [n.midi for n in mel if n.onset < nxt.onset + beat and n.end > nxt.onset]
-            if res and nxt_over and max(nxt_over) - res[0] <= 10 and min(nxt_over) - m >= 3:
+            res_over = [n.midi for n in mel if n.onset < min(nxt.end, stop) and
+                        n.end > nxt.onset + beat]
+            if res and nxt_over and max(nxt_over) - m <= 10 and min(nxt_over) - m >= 3 and \
+                    (not res_over or (max(res_over) - res[0] <= 10 and
+                                      min(res_over) - res[0] >= 3)):
                 out.append(Note(h.onset, dur, [spell(m, h)], tie=True))
                 out.append(Note(nxt.onset, beat, [spell(m, h)]))
                 out.append(Note(nxt.onset + beat, nxt.end - nxt.onset - beat,
@@ -1195,11 +1575,21 @@ _GENRE_TITLES = {
     "mazurka": "Mazurka", "etude": "Étude", "étude": "Étude", "study": "Study",
     "sonata": "Sonata", "invention": "Invention", "fugue": "Fugue", "ballade": "Ballade",
     "rhapsody": "Rhapsody", "scherzo": "Scherzo", "intermezzo": "Intermezzo",
-    "impromptu": "Impromptu", "concerto": "Concerto",
+    "impromptu": "Impromptu", "concerto": "Concerto", "rondo": "Rondo", "rondeau": "Rondeau",
+    "variations": "Variations", "theme and variations": "Theme and Variations",
+    "march": "March", "marche": "Marche", "tarantella": "Tarantella",
+    "siciliano": "Siciliano", "siciliana": "Siciliana", "lullaby": "Lullaby", "hymn": "Hymn",
+    "humoresque": "Humoresque", "fairy tale": "Fairy Tale", "skazka": "Skazka",
+    "bagatelle": "Bagatelle", "novelette": "Novelette", "nocturno": "Notturno",
+    "caprice": "Caprice", "capriccio": "Capriccio", "serenade": "Serenade",
+    "idyll": "Idyll", "album leaf": "Albumblatt", "albumblatt": "Albumblatt",
+    "motif": "Motif", "phrase": "Phrase", "theme": "Theme", "introduction": "Introduction",
+    "melody": "Melody", "tune": "Tune",
+    "cadenza": "Cadenza", "progression": "Chord Progression",
 }
 _FORMAL = ("Concerto", "Sonata", "Fugue", "Invention", "Waltz", "Nocturne", "Prelude",
            "Étude", "Rondo", "Mazurka", "Scherzo", "Ballade", "Rhapsody", "Intermezzo",
-           "Impromptu", "Variations")
+           "Impromptu", "Variations", "Theme and Variations")
 
 
 def _retitle(plan: CompositionPlan, genre: str, named: bool = False) -> None:
@@ -1212,9 +1602,8 @@ def _retitle(plan: CompositionPlan, genre: str, named: bool = False) -> None:
     title = plan.title or ""
     head = title.split(" in ", 1)[0]
     user_titled = bool(re.search(r"\b(called|titled|named)\b", (plan.prompt or "").lower()))
-    if name and not user_titled and (
-            (head in _FORMAL and head != name and " in " in title) or
-            (named and head not in _FORMAL)):
+    if name and not user_titled and head != name and (
+            (head in _FORMAL and " in " in title) or named):
         plan.title = f"{name} in {plan.key}"
     plan.title = re.sub(r"\b([A-G])b\b", "\\1♭", re.sub(r"\b([A-G])#", "\\1♯", plan.title))
 

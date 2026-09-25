@@ -58,6 +58,7 @@ class TextureContext:
     tempo: float = 90.0            # beats per minute, so figuration suits the speed
     melody: list = field(default_factory=list)   # the phrase's tune, for textures that imitate it
     virtuoso: bool = False         # a composer whose runs stay fast at any tempo
+    grand: bool = True             # a Romantic sound: the left hand may toll like bells
 
 
 def bass_note(h: Harmony, ctx: TextureContext, octave_down: bool = False) -> int:
@@ -68,7 +69,17 @@ def bass_note(h: Harmony, ctx: TextureContext, octave_down: bool = False) -> int
     if not cands:
         cands = [m for m in range(24, 60) if m % 12 == pc]
     if ctx.prev_bass is not None:
-        best = min(cands, key=lambda m: (abs(m - ctx.prev_bass), m))
+        # near the last bass, but not sinking into the piano's bottom octave
+        # (or climbing out of the bass) for long: past the home register the
+        # line leaps back by an octave
+        home_low, home_high = ctx.bass_low + 7, ctx.bass_high - 4
+
+        def cost(m: int) -> float:
+            out = abs(m - ctx.prev_bass)
+            out += 1.2 * max(0, home_low - m) + 1.2 * max(0, m - home_high)
+            return out
+
+        best = min(cands, key=lambda m: (cost(m), m))
     else:
         mid = (ctx.bass_low + ctx.bass_high) // 2
         best = min(cands, key=lambda m: abs(m - mid))
@@ -162,6 +173,9 @@ def inner_chord(h: Harmony, t0: F, dur: F, ctx: TextureContext, n: int = 2) -> l
     low = _melody_low(ctx, t0, t0 + dur)
     if top is None or low is None:
         return []
+    running = sum(1 for n in ctx.melody if t0 <= n.onset < t0 + dur)
+    if running > 2 * float(dur / ctx.beat):
+        return []                  # a hand running in quick notes holds nothing under them
     hi = low - 3
     lo = max(top - 13, 52)
     if hi - lo < 3:
@@ -229,6 +243,71 @@ def waltz(h: Harmony, t0: F, dur: F, ctx: TextureContext) -> list[TexNote]:
     return out
 
 
+def chorale(h: Harmony, t0: F, dur: F, ctx: TextureContext) -> list[TexNote]:
+    """The chords alone, as a progression is played: the bass in the left
+    hand (in octaves when the music is strong), the chord in close position
+    in the right, each voice moving as little as it can."""
+    b = bass_note(h, ctx)
+    ctx.prev_bass = b
+    lh = [b - 12, b] if ctx.energy > 0.7 and b - 12 >= 28 else [b]
+    v = voicing(h, ctx, 4 if len(h.pcs) >= 4 else 3, 58, 77, ctx.prev_voicing, max_span=12,
+                include_bass_pc=True)
+    ctx.prev_voicing = v or ctx.prev_voicing
+    out = [TexNote(t0, dur, lh)]
+    if v:
+        out.append(TexNote(t0, dur, v, staff="RH", voice=1))
+    return out
+
+
+def march(h: Harmony, t0: F, dur: F, ctx: TextureContext) -> list[TexNote]:
+    """The march bass: the bass on the strong beats (root, then the fifth
+    below), the chord on the weak ones, short and firm."""
+    out: list[TexNote] = []
+    b = bass_note(h, ctx)
+    ctx.prev_bass = b
+    fifth = next((m for m in range(b - 7, b - 3) if m % 12 == (h.root_pc + 7) % 12
+                  and m >= 28), b)
+    top = _below_melody(ctx, t0, ctx.mid_high)
+    v = voicing(h, ctx, 3, max(b + 7, ctx.mid_low), top, ctx.prev_voicing, max_span=9)
+    ctx.prev_voicing = v or ctx.prev_voicing
+    t, k = t0, 0
+    while t < t0 + dur:
+        d = min(ctx.beat, t0 + dur - t)
+        pos = (t % ctx.bar_len) / ctx.beat
+        if pos % 2 == 0:
+            out.append(TexNote(t, d, [b if (pos == 0 or k % 2 == 0) else fifth]))
+            k += 1
+        elif v:
+            out.append(TexNote(t, d, list(v), marks=["stacc"] if ctx.energy > 0.5 else []))
+        t += ctx.beat
+    return out
+
+
+def polonaise(h: Harmony, t0: F, dur: F, ctx: TextureContext) -> list[TexNote]:
+    """The polonaise rhythm in the left hand — an eighth, two sixteenths,
+    then four eighths — the bass on the downbeat and the chord after it."""
+    out: list[TexNote] = []
+    b = bass_note(h, ctx)
+    ctx.prev_bass = b
+    top = _below_melody(ctx, t0, ctx.mid_high)
+    v = voicing(h, ctx, 3, max(b + 7, ctx.mid_low - 2), top, ctx.prev_voicing, max_span=9)
+    ctx.prev_voicing = v or ctx.prev_voicing
+    if ctx.time != (3, 4) or not v:
+        return block(h, t0, dur, ctx)
+    rhythm = [F(1, 2), F(1, 4), F(1, 4), F(1, 2), F(1, 2), F(1, 2), F(1, 2)]
+    t = t0
+    while t < t0 + dur:
+        on = t
+        for i, d in enumerate(rhythm):
+            if on >= t0 + dur:
+                break
+            notes = [b - 12 if b - 12 >= 28 else b, b] if i == 0 else list(v)
+            out.append(TexNote(on, min(d, t0 + dur - on), notes))
+            on += d
+        t += ctx.bar_len
+    return out
+
+
 def alberti(h: Harmony, t0: F, dur: F, ctx: TextureContext) -> list[TexNote]:
     """Low, high, middle, high: Mozart's broken chord in the tenor."""
     out: list[TexNote] = []
@@ -260,7 +339,7 @@ def block(h: Harmony, t0: F, dur: F, ctx: TextureContext, rh_inner: bool = True
     """A chorale: the bass (in octaves when the music is strong) with the
     chord above it, and the chord's upper notes held in the right hand under
     the melody where the hand can reach them."""
-    if ctx.energy > 0.8 and dur >= 2 * ctx.beat:
+    if ctx.energy > 0.8 and dur >= 2 * ctx.beat and ctx.grand:
         # at full strength the left hand tolls and answers, as in the bells
         return bells(h, t0, dur, ctx)
     out: list[TexNote] = []
@@ -272,15 +351,20 @@ def block(h: Harmony, t0: F, dur: F, ctx: TextureContext, rh_inner: bool = True
         top = min(_below_melody(ctx, t0, ctx.mid_high + 2), b + 12)
         lh += voicing(h, ctx, 2, b + 3, top, ctx.prev_voicing, max_span=9)
     ctx.prev_voicing = [m for m in lh if m > b] or ctx.prev_voicing
-    if ctx.tempo * float(ctx.beat) >= 110 and dur >= 2 * ctx.beat:
-        # at a quick tempo a held chord goes dead: strike it on every beat
-        t = t0
-        while t < t0 + dur:
-            d = min(ctx.beat, t0 + dur - t)
-            out.append(TexNote(t, d, sorted(set(lh))))
-            t += ctx.beat
+    quick = ctx.tempo * float(ctx.beat) >= 110
+    if dur >= 2 * ctx.beat and (quick or ctx.energy >= 0.7):
+        # at a quick tempo a held chord goes dead, and music that presses on
+        # does not sit still: strike it on every beat
+        step = ctx.beat
+    elif dur >= 2 * ctx.beat and ctx.energy >= 0.45 and (dur / 2) % ctx.beat == 0:
+        step = dur / 2                  # moving music: the chord struck again half-way
     else:
-        out.append(TexNote(t0, dur, sorted(set(lh))))
+        step = dur
+    t = t0
+    while t < t0 + dur:
+        d = min(step, t0 + dur - t)
+        out.append(TexNote(t, d, sorted(set(lh))))
+        t += step
     if rh_inner:
         v = inner_chord(h, t0, dur, ctx, 2)
         if v:
@@ -447,9 +531,12 @@ def tenor(h: Harmony, t0: F, dur: F, ctx: TextureContext) -> list[TexNote]:
         t += unit
     b = bass_note(h, ctx)
     ctx.prev_bass = b
-    low = _melody_low(ctx, t0, t0 + min(dur, ctx.beat))
-    if low is not None and 5 <= low - b <= 12:
-        out.append(TexNote(t0, min(dur, ctx.beat * 2), [b], staff="LH", voice=2))
+    hold = min(dur, ctx.beat * 2)
+    # the bass is held under whatever the tune plays meanwhile: every note of
+    # it must be within the left hand's reach of the bass
+    under = [n.midi for n in ctx.melody if n.onset < t0 + hold and n.onset + n.dur > t0]
+    if under and all(5 <= m - b <= 14 for m in under):
+        out.append(TexNote(t0, hold, [b], staff="LH", voice=2))
     return out
 
 
@@ -474,7 +561,8 @@ REALISERS = {
     "nocturne": nocturne, "waltz": waltz, "alberti": alberti, "block": block,
     "bells": bells, "sweep": lambda h, t, d, c: sweep(h, t, d, c, True),
     "sweep16": lambda h, t, d, c: sweep(h, t, d, c, False), "repeated": repeated,
-    "sustained": sustained, "final": final_chord, "tenor": tenor,
+    "sustained": sustained, "final": final_chord, "tenor": tenor, "march": march,
+    "polonaise": polonaise, "chorale": chorale, "none": lambda h, t, d, c: [],
 }
 
 

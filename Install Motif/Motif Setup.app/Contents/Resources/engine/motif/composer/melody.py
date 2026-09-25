@@ -185,6 +185,27 @@ CELLS["floating"] = _cells({
 })
 
 
+CELLS["march"] = _cells({
+    # dotted fanfares, firm quarters and repeated notes on the beat
+    "idea": {(4, 4): [["3/4", "1/4", 1, 1, 1], [1, "3/4", "1/4", 2], ["3/4", "1/4", "3/4", "1/4", 2],
+                      [1, 1, "3/4", "1/4", 1], ["3/2", "1/2", 1, 1], [1, "1/2", "1/2", 2]],
+             (2, 4): [["3/4", "1/4", 1], ["3/4", "1/4", "1/2", "1/2"], [1, "3/4", "1/4"],
+                      ["1/2", "1/2", 1]],
+             (3, 4): [["3/4", "1/4", 1, 1], [1, "3/4", "1/4", 1], ["3/2", "1/4", "1/4", 1],
+                      [1, "1/2", "1/2", 1]]},
+    "flow": {(4, 4): [[1, 1, 1, 1], ["3/4", "1/4", 1, "3/4", "1/4", 1], ["1/2", "1/2", 1, 1, 1],
+                      [1, "3/4", "1/4", 1, 1]],
+             (2, 4): [[1, 1], ["1/2", "1/2", "1/2", "1/2"], ["3/4", "1/4", "3/4", "1/4"]],
+             (3, 4): [[1, 1, 1], ["3/4", "1/4", 1, 1], ["1/2", "1/4", "1/4", 1, 1]]},
+    "close": {(4, 4): [[1, 1, 2], [2, 2], ["3/4", "1/4", 1, 2]], (2, 4): [[1, 1], [2]],
+              (3, 4): [[2, 1], [3]]},
+})
+
+#: Named kinds of piece whose tunes have a rhythm of their own.
+GENRE_CELLS = {"march": "march", "marche": "march", "polonaise": "march",
+               "gigue": "motoric", "tarantella": "motoric", "toccata": "motoric"}
+
+
 #: Set while composing something a learner can play: no note shorter than an
 #: eighth and no triplets.
 SIMPLE = {"on": False}
@@ -413,6 +434,9 @@ def motif_score(m: Motif, style: MelodyStyle) -> float:
     s -= 1.5 * osc
     reps = steps.count(0)
     s -= 0.8 * max(0, reps - (1 if style.cells == "grand" else 0))
+    # a long note struck again is a held note that lost its tie
+    s -= 0.8 * sum(1 for k, x in enumerate(steps)
+                   if x == 0 and k + 1 < len(durs) and durs[k] >= 1 and durs[k + 1] >= 1)
     if any(a == 0 and b == 0 for a, b in zip(steps, steps[1:])):
         s -= 1.5
     # one high point, not the first note, held rather than passed through
@@ -530,8 +554,13 @@ def roles_for(kind: str, bars: int) -> list[str]:
             return ["flow", "cadence"][-bars:]
         body = ["recall:0", "recall:1", "fragment", "flow", "fragment", "flow"]
         return (body + ["flow"] * bars)[:bars - 1] + ["cadence"]
-    if kind == "intro":
+    if kind == "intro" or kind == "progression":
         return ["rest"] * bars
+    if kind == "motif":
+        # the idea itself: stated, and — given room — answered and closed
+        return {1: ["idea"], 2: ["idea", "idea2"], 3: ["idea", "idea2", "cadence"],
+                4: ["idea", "idea2", "repeat", "cadence"]}.get(
+            bars, ["idea", "idea2", "repeat", "repeat2"] + ["flow"] * (bars - 5) + ["cadence"])
     if bars <= 1:
         return ["cadence"]
     return (["idea", "idea2"] + ["flow"] * bars)[:bars - 1] + ["cadence"]
@@ -869,6 +898,8 @@ class MelodyWriter:
                     c += 0.8                        # two leaps in one direction
             if m == prev and d < F(1, 2):
                 c += 0.8
+            if m == prev and i > 0 and slots[i - 1].d >= 1 and d >= 1:
+                c += 0.9          # a long note struck again: a held note that lost its tie
             if prev2 is not None and m == prev == prev2:
                 c += 1.5                                # a note hammered three times
             if len(seq) >= 3 and m == seq[-2] and prev == seq[-3] and m != prev:
@@ -1003,23 +1034,32 @@ def _shift_cost(shift: int, role: str, before_peak: bool, same_chord: bool) -> f
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
+def _crooked(t: F) -> bool:
+    """Whether a point in the bar falls inside a triplet (or other tuplet)."""
+    d = t.denominator
+    return d & (d - 1) != 0
+
+
 def _first_half(rhythm: list[F], bar: F) -> list[F]:
+    """The first half of a bar's rhythm, for fragmenting an idea — cut only
+    where no triplet is broken."""
     half, acc, out = bar / 2, F(0), []
     for v in rhythm:
         if acc + v > half:
-            out.append(half - acc)
-            acc = half
             break
         out.append(v)
         acc += v
         if acc == half:
             break
+    while out and _crooked(acc):
+        acc -= out.pop()
     if acc < half:
         out.append(half - acc)
     return [v for v in out if v > 0]
 
 
 def _fit_rhythm(r: list[F], bar: F) -> list[F]:
+    """A rhythm cut or stretched to fill ``bar`` without breaking a triplet."""
     total = sum(r)
     if total == 0:
         return [bar]
@@ -1027,11 +1067,15 @@ def _fit_rhythm(r: list[F], bar: F) -> list[F]:
         out, acc = [], F(0)
         for v in r:
             if acc + v >= bar:
-                out.append(bar - acc)
                 break
             out.append(v)
             acc += v
+        while out and _crooked(acc):
+            acc -= out.pop()
+        out.append(bar - acc)
         return [v for v in out if v > 0]
+    if _crooked(r[-1]):
+        return r + [bar - total]
     return r[:-1] + [r[-1] + (bar - total)]
 
 
@@ -1225,8 +1269,9 @@ def respell_line(notes: list[MelNote], harmony: list[Harmony], key: Key) -> None
         good = [p for p in options if before is None or p.step != before.step]
         if good:
             n.pitch = good[0]
-        elif options:
+        elif options and (n.pitch is None or before is None or n.pitch.step == before.step):
             n.pitch = options[0]
+        # otherwise the plain spelling stands: B flat, C, C sharp, D
 
 
 @dataclass

@@ -25,7 +25,15 @@ _NOTE_RE = re.compile(
     re.I)
 _METER_RE = re.compile(r"\b(\d{1,2})\s*/\s*(\d{1,2})\b")
 _BPM_RE = re.compile(r"\b(\d{2,3})\s*(?:bpm|beats per minute)\b", re.I)
-_BARS_RE = re.compile(r"\b(\d{1,3})\s*(?:bars?|measures?)\b", re.I)
+_NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
+                 "eight": 8, "nine": 9, "ten": 10, "twelve": 12, "sixteen": 16, "twenty": 20,
+                 "twenty-four": 24, "thirty-two": 32, "forty": 40, "sixty-four": 64}
+_BARS_RE = re.compile(r"\b(\d{1,3}|" + "|".join(sorted(_NUMBER_WORDS, key=len, reverse=True))
+                      + r")\s*-?\s*(?:bars?|measures?)\b", re.I)
+
+
+def _count(word: str) -> int:
+    return int(word) if word.isdigit() else _NUMBER_WORDS[word.lower()]
 _MINUTES_RE = re.compile(r"\b(\d{1,2})\s*(?:-|\s)?\s*(?:minutes?|mins?)\b", re.I)
 
 MOODS: dict[str, dict] = {
@@ -269,8 +277,20 @@ def parse_prompt(prompt: str, *, seed: int | None = None,
     # -- ensemble & form ---------------------------------------------------
     ensemble = _detect(text, ENSEMBLE_WORDS) or "solo_piano"
     form = _detect(text, FORM_WORDS)
+    if form == "concerto" and ensemble == "solo_piano" \
+            and not any(w in text for w in ENSEMBLE_WORDS["solo_piano"]):
+        # "a Rachmaninoff concerto" is a piano concerto
+        ensemble = "piano_concerto"
     if form is None:
-        form = "concerto" if ensemble == "piano_concerto" else rng.choice(list(style.forms))
+        if ensemble == "piano_concerto":
+            form = "concerto"
+        else:
+            # a piece nobody asked to be a concerto is not one; études and
+            # mazurkas belong to the piano
+            pool = [f for f in style.forms if f != "concerto"]
+            if ensemble not in ("solo_piano", "harpsichord", "organ"):
+                pool = [f for f in pool if f not in ("etude", "etude_tableau", "mazurka")]
+            form = rng.choice(pool or ["ternary"])
     if form not in FORMS:
         form = "ternary"
     if ensemble == "piano_concerto" and form not in ("concerto", "sonata", "rondo"):
@@ -281,7 +301,7 @@ def parse_prompt(prompt: str, *, seed: int | None = None,
     bars = None
     mb = _BARS_RE.search(text)
     if mb:
-        bars = max(2, min(400, int(mb.group(1))))
+        bars = max(2, min(400, _count(mb.group(1))))
     mm = _MINUTES_RE.search(text)
     if bars is None and mm:
         bars = max(8, min(400, int(mm.group(1)) * 30))
@@ -290,6 +310,12 @@ def parse_prompt(prompt: str, *, seed: int | None = None,
         for words, n in SCOPE_WORDS:
             if any(w in text for w in words):
                 bars = n
+        # a size asked for outright outweighs the size a kind of piece
+        # usually has: a short prelude is short
+        if re.search(r"\b(short|brief|little|small|tiny|miniature)\b", text):
+            bars = min(bars, 24)
+        elif re.search(r"\b(long|extended|substantial|big|large)\b", text):
+            bars = max(bars, 80)
         if simple:
             bars = min(bars, 16)
     if ensemble == "piano_concerto" and not mb:
@@ -352,6 +378,7 @@ def parse_prompt(prompt: str, *, seed: int | None = None,
         subtitle=_subtitle(ensemble, style),
         style=style.name, key=str(key), time=time, tempo=bpm, tempo_text=tempo_text,
         tempo_given=tempo_given, time_given=time_given, length_bars=length_bars,
+        size_bars=bars,
         form=form, sections=sections, instruments=instruments,
         seed=rng.randint(1, 2 ** 30), prompt=prompt, character=character,
         ensemble=ensemble)
