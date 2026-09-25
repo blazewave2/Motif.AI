@@ -24,7 +24,8 @@ from ..theory.pitch import Key, Pitch
 from .form import FormPlan, PhraseSpec, choose_metre, detect_genre, genre_family, plan_form
 from .harmony import (Harmony, PhraseHarmonySpec, harmony_at, harmony_style, plan_phrase,
                       revise, spell)
-from .melody import (MelNote, Motif, MelodyWriter, PhrasePlan, _random_motif, implied_harmony,
+from .melody import (GENRE_CELLS, MelNote, Motif, MelodyWriter, PhrasePlan, _random_motif,
+                     implied_harmony,
                      invent_motif, melody_style, motif_score, respell_line, roles_for)
 from .notation import (BarInfo, Mark, Note, Sheet, Voice, bar_length, beat_length,
                        group_tuplets as _group_tuplets)
@@ -184,6 +185,11 @@ class Composer:
                     p.variation = ""
         hstyle = harmony_style(prof.harmony)
         mstyle = melody_style(prof.melody)
+        cells = next((c for g, c in GENRE_CELLS.items() if g in self.genre.lower()), None)
+        if cells:
+            # a march, a polonaise, a gigue has a rhythm of its own
+            from dataclasses import replace as _replace
+            mstyle = _replace(mstyle, cells=cells)
 
         self._say("themes", "Inventing the themes" if self.theme is None else
                   "Listening to your theme", "", 0.06)
@@ -684,7 +690,7 @@ class Composer:
             self._mark_phrase(rh, lh, w, first=(wi == 0))
         if self.family == "variations":
             self._section_marks(sheet, rh, written)
-        else:
+        elif not any(g in self.genre.lower() for g in _STEADY):
             self._tempo_changes(sheet, rh, written)
         _final_marks(rh, lh, rh2, end, self.bar)
         sheet.bar_info.setdefault(bars, BarInfo()).barline = "final"
@@ -821,8 +827,10 @@ class Composer:
             if len(after) >= 2:
                 rh.marks.append(Mark(after[0].onset, "dim"))
                 rh.marks.append(Mark(after[-1].onset, "end"))
-        # pedal with every change of harmony
-        if prof.pedal == "harmony":
+        # pedal with every change of harmony (never under a march's detached chords)
+        if ps.texture == "march":
+            pass
+        elif prof.pedal == "harmony":
             for h in w.harmony:
                 lh.marks.append(Mark(h.onset, "ped"))
         elif prof.pedal == "sparse" and ps.role in ("closing", "climax"):
@@ -949,6 +957,10 @@ def _virtuoso(prof: Profile) -> bool:
 
 def prof_pedal(prof: Profile) -> bool:
     return prof.harmony in ("russian", "romantic", "impressionist")
+
+
+#: Pieces that keep a steady pulse from section to section.
+_STEADY = ("march", "marche", "gigue", "toccata", "tarantella", "gavotte")
 
 
 def _writer_for(ps: PhraseSpec, writers: dict) -> MelodyWriter:
@@ -1424,9 +1436,8 @@ def _retitle(plan: CompositionPlan, genre: str, named: bool = False) -> None:
     title = plan.title or ""
     head = title.split(" in ", 1)[0]
     user_titled = bool(re.search(r"\b(called|titled|named)\b", (plan.prompt or "").lower()))
-    if name and not user_titled and (
-            (head in _FORMAL and head != name and " in " in title) or
-            (named and head not in _FORMAL)):
+    if name and not user_titled and head != name and (
+            (head in _FORMAL and " in " in title) or named):
         plan.title = f"{name} in {plan.key}"
     plan.title = re.sub(r"\b([A-G])b\b", "\\1♭", re.sub(r"\b([A-G])#", "\\1♯", plan.title))
 

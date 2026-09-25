@@ -116,6 +116,13 @@ def _dress_for_genre(plan: FormPlan, genre: str, prof: Profile) -> None:
         for p in plan.phrases:
             if p.role != "intro":
                 p.texture = "walking" if prof.harmony == "baroque" else "sweep16"
+    if "polonaise" in genre or "march" in genre or "marche" in genre:
+        # a polonaise and a march are stately, not dreamy
+        for p in plan.phrases:
+            if p.role in ("theme", "return"):
+                p.energy = max(p.energy, 0.62)
+                if p.new_section and p.words in ("", "dolce", "cantabile", "espressivo"):
+                    p.words = "maestoso" if "polonaise" in genre else "marcato"
 
 
 #: Textures that can set the scene on their own before the tune comes in.
