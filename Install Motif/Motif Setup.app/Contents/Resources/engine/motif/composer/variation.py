@@ -333,6 +333,9 @@ def _figure(n: MelNote, nxt: MelNote, harmony: list[Harmony], key: Key, unit: F,
         both = ct(j - 1, a) and ct(j, b)
         if iv == 0:
             return 1.6
+        if iv == 6:
+            # a tritone leap is awkward in a line, less so breaking a seventh chord
+            return 1.4 if both else 4.0
         if iv <= 2:
             return 0.25 if arpeggio else 0.0
         if not both:

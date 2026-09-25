@@ -506,12 +506,28 @@ def walking(h: Harmony, t0: F, dur: F, ctx: TextureContext, nxt: Harmony | None 
 
 
 def sustained(h: Harmony, t0: F, dur: F, ctx: TextureContext) -> list[TexNote]:
-    """An open, pedalled sonority: bass, fifth and ninth or tenth."""
+    """An open, pedalled sonority: the bass and its fifth, and above them the
+    chord's own colour — its seventh, ninth or added sixth — or, for a plain
+    triad, its tenth: left ringing, as Debussy and Ravel leave it."""
     b = bass_note(h, ctx)
     ctx.prev_bass = b
-    top = _below_melody(ctx, t0, 62)
-    tones = [m for m in chord_tones_between(h, b + 7, top)][:2]
-    return [TexNote(t0, dur, [b] + tones)]
+    top = min(_below_melody(ctx, t0, 62), b + 16)
+    tones = chord_tones_between(h, b + 7, top)
+    if not tones:
+        return [TexNote(t0, dur, [b])]
+    root = h.root_pc
+    triad = {root, (root + 3) % 12, (root + 4) % 12, (root + 6) % 12, (root + 7) % 12,
+             (root + 8) % 12}
+    colour = [m for m in tones if m % 12 not in triad]
+    fifth = next((m for m in tones if (m - b) % 12 == 7 and m - b < 12), None)
+    tenth = next((m for m in tones if m - b >= 14 and (m - root) % 12 in (3, 4)), None)
+    pick = [m for m in (fifth, colour[0] if colour else tenth) if m is not None]
+    for m in tones:
+        if len(pick) >= 2:
+            break
+        if m not in pick and all(abs(m - x) >= 3 for x in pick):
+            pick.append(m)
+    return [TexNote(t0, dur, [b] + sorted(pick)[:2])]
 
 
 def tenor(h: Harmony, t0: F, dur: F, ctx: TextureContext) -> list[TexNote]:

@@ -141,6 +141,7 @@ class Composer:
             if self.scope == "cadenza":
                 self.tempo, self.tempo_text = 96, "Liberamente"
         self._last_dyn: str | None = None
+        self._last_dyn_at: F | None = None
         self._figures: set = set()               # figurations the variations have used
         #: a piece for a learner: plain rhythms, an easy left hand, no ornaments
         self.simple = "simplified" in (plan.notes or "")
@@ -505,10 +506,46 @@ class Composer:
             if not harmony[0].pedal and all(h.pedal is None for h in harmony):
                 harmony = fix_parallels(harmony, body, self.beat, ps.key,
                                         protect=2 if cad > 1 else 1)
+            if self._passagework(ps):
+                best = self._passage(best, harmony, ps, t)
+                body = [n for n in best if n.onset >= t]
+                if not harmony[0].pedal and all(h.pedal is None for h in harmony):
+                    # the runs meet the bass on new notes: check them against it again
+                    harmony = fix_parallels(harmony, body, self.beat, ps.key,
+                                            protect=2 if cad > 1 else 1)
             for n in body:
                 n.pitch = spell(n.midi, harmony_at(harmony, n.onset))
             respell_line(body, harmony, ps.key)
         return Written(ps, t, harmony, best or [], [], upbeat=up)
+
+    def _passagework(self, ps: PhraseSpec) -> bool:
+        """A Classical Allegro breaks into running scales and arpeggios as
+        it leaves its first theme for the next key, as Mozart's and
+        Haydn's sonatas do."""
+        return (self.prof.harmony == "classical" and ps.role == "transition"
+                and float(self.tempo) * float(self.beat) >= 100 and ps.bars >= 2
+                and not self.melody_only and not self.scope)
+
+    def _passage(self, melody: list[MelNote], harmony: list[Harmony], ps: PhraseSpec,
+                 t: F) -> list[MelNote]:
+        """The phrase's line as the skeleton of running passagework: scales
+        and broken chords in sixteenths (eighths at a very quick tempo) that
+        find their way from each of its notes to the next, the cadence bar
+        left as written so the passage lands."""
+        last_bar = t + self.bar * (ps.bars - 1)
+        head = [m for m in melody if m.onset < last_bar]
+        tail = [m for m in melody if m.onset >= last_bar]
+        if len([m for m in head if m.onset >= t]) < 2 or not tail:
+            return melody
+        qbpm = float(self.tempo) * ps.tempo_scale * float(self.beat)
+        unit = F(1, 4) if (self.beat == 1 and qbpm <= 152) else F(1, 2)
+        body = [m for m in melody if m.onset >= t]
+        mst = melody_style(self.prof.melody)
+        lo = max(55, min(m.midi for m in body) - 7)
+        hi = min(mst.climax_high + 2, max(m.midi for m in body) + 9)
+        runs = figurate(head + tail[:1], harmony, ps.key, t, unit, self.beat, self.bar, lo, hi,
+                        0.45, avoid=set(), reach=12, sweep=True)
+        return [m for m in runs if m.onset < last_bar] + tail
 
     def _recall(self, src: Written, ps: PhraseSpec, t: F, written: list[Written]) -> Written:
         """An earlier phrase returns: same harmony (in this phrase's key) and
@@ -929,9 +966,14 @@ class Composer:
         elif ps.role == "transition":
             # a passage leading home starts below where it is going and grows
             dyn = _energy_dynamic(prof, max(0.3, ps.energy - 0.3), ceiling)
-        if first or ps.new_section or dyn != self._last_dyn:
+        # a new section restates its level only as a reminder, not a bar
+        # after the same marking (an introduction's mp and the tune's)
+        reminder = ps.new_section and (self._last_dyn_at is None or
+                                       at - self._last_dyn_at >= 4 * self.bar)
+        if first or dyn != self._last_dyn or reminder:
             (rh if w.melody else lh).marks.append(Mark(at, "dyn", dyn))
             self._last_dyn = dyn
+            self._last_dyn_at = at
         if ps.words and ps.words.lower() != (self.tempo_text or "").lower():
             rh.marks.append(Mark(at, "text", ps.words))
         mel = [n for n in w.melody if n.onset >= w.start]
@@ -990,6 +1032,17 @@ class Composer:
             deg = (pen.midi - w.spec.key.tonic_pc) % 12
             if pen.dur >= self.beat / 2 and deg in (2, 11) and "tr" not in pen.marks:
                 pen.marks = list(pen.marks) + ["tr"]
+        if "mazurka" in self.genre.lower() and self.time == (3, 4):
+            # the mazurka's stress falls on the second or third beat: every
+            # other bar, the note that lands there and is held is leaned on
+            for bar_start in sorted({(n.onset // self.bar) * self.bar for n in mel})[::2]:
+                inside = [n for n in mel if bar_start <= n.onset < bar_start + self.bar]
+                late = [n for n in inside if n.onset - bar_start in (self.beat, 2 * self.beat)
+                        and n.dur >= self.beat]
+                if late and inside[-1] is not mel[-1]:
+                    n = max(late, key=lambda x: x.dur)
+                    if "accent" not in n.marks:
+                        n.marks = list(n.marks) + ["accent"]
         if prof.name == "beethoven" and w.spec.energy >= 0.7:
             for n in mel:
                 if (n.onset - w.start) % (self.bar * 2) == 0 and n.dur >= self.beat:
