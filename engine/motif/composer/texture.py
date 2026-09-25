@@ -69,7 +69,17 @@ def bass_note(h: Harmony, ctx: TextureContext, octave_down: bool = False) -> int
     if not cands:
         cands = [m for m in range(24, 60) if m % 12 == pc]
     if ctx.prev_bass is not None:
-        best = min(cands, key=lambda m: (abs(m - ctx.prev_bass), m))
+        # near the last bass, but not sinking into the piano's bottom octave
+        # (or climbing out of the bass) for long: past the home register the
+        # line leaps back by an octave
+        home_low, home_high = ctx.bass_low + 7, ctx.bass_high - 4
+
+        def cost(m: int) -> float:
+            out = abs(m - ctx.prev_bass)
+            out += 1.2 * max(0, home_low - m) + 1.2 * max(0, m - home_high)
+            return out
+
+        best = min(cands, key=lambda m: (cost(m), m))
     else:
         mid = (ctx.bass_low + ctx.bass_high) // 2
         best = min(cands, key=lambda m: abs(m - mid))
@@ -276,15 +286,20 @@ def block(h: Harmony, t0: F, dur: F, ctx: TextureContext, rh_inner: bool = True
         top = min(_below_melody(ctx, t0, ctx.mid_high + 2), b + 12)
         lh += voicing(h, ctx, 2, b + 3, top, ctx.prev_voicing, max_span=9)
     ctx.prev_voicing = [m for m in lh if m > b] or ctx.prev_voicing
-    if ctx.tempo * float(ctx.beat) >= 110 and dur >= 2 * ctx.beat:
-        # at a quick tempo a held chord goes dead: strike it on every beat
-        t = t0
-        while t < t0 + dur:
-            d = min(ctx.beat, t0 + dur - t)
-            out.append(TexNote(t, d, sorted(set(lh))))
-            t += ctx.beat
+    quick = ctx.tempo * float(ctx.beat) >= 110
+    if dur >= 2 * ctx.beat and (quick or ctx.energy >= 0.7):
+        # at a quick tempo a held chord goes dead, and music that presses on
+        # does not sit still: strike it on every beat
+        step = ctx.beat
+    elif dur >= 2 * ctx.beat and ctx.energy >= 0.45 and (dur / 2) % ctx.beat == 0:
+        step = dur / 2                  # moving music: the chord struck again half-way
     else:
-        out.append(TexNote(t0, dur, sorted(set(lh))))
+        step = dur
+    t = t0
+    while t < t0 + dur:
+        d = min(step, t0 + dur - t)
+        out.append(TexNote(t, d, sorted(set(lh))))
+        t += step
     if rh_inner:
         v = inner_chord(h, t0, dur, ctx, 2)
         if v:

@@ -413,6 +413,9 @@ def motif_score(m: Motif, style: MelodyStyle) -> float:
     s -= 1.5 * osc
     reps = steps.count(0)
     s -= 0.8 * max(0, reps - (1 if style.cells == "grand" else 0))
+    # a long note struck again is a held note that lost its tie
+    s -= 0.8 * sum(1 for k, x in enumerate(steps)
+                   if x == 0 and k + 1 < len(durs) and durs[k] >= 1 and durs[k + 1] >= 1)
     if any(a == 0 and b == 0 for a, b in zip(steps, steps[1:])):
         s -= 1.5
     # one high point, not the first note, held rather than passed through
@@ -869,6 +872,8 @@ class MelodyWriter:
                     c += 0.8                        # two leaps in one direction
             if m == prev and d < F(1, 2):
                 c += 0.8
+            if m == prev and i > 0 and slots[i - 1].d >= 1 and d >= 1:
+                c += 0.9          # a long note struck again: a held note that lost its tie
             if prev2 is not None and m == prev == prev2:
                 c += 1.5                                # a note hammered three times
             if len(seq) >= 3 and m == seq[-2] and prev == seq[-3] and m != prev:

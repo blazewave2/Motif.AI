@@ -907,6 +907,9 @@ def judge_melody(notes: list[MelNote], plan: PhrasePlan) -> float:
     score -= 0.6 * max(0, 9 - rng)
     durs = {n.dur for n in notes}
     score += 0.5 * min(len(durs), 4)
+    # a long note struck again and again makes a line stand still
+    score -= 1.0 * sum(1 for a, b in zip(notes, notes[1:])
+                       if a.midi == b.midi and a.dur >= 1 and b.dur >= 1)
     last = mids[-1]
     deg = (last - plan.key.tonic_pc) % 12
     if plan.cadence == "PAC" and deg != 0:
