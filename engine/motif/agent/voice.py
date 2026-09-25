@@ -49,6 +49,35 @@ def _pretty_key(key) -> str:
     return re.sub(r"\b([A-G])b\b", "\\1♭", re.sub(r"\b([A-G])#", "\\1♯", text))
 
 
+_SUP = str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹")
+_SUB = str.maketrans("0123456789", "₀₁₂₃₄₅₆₇₈₉")
+
+
+def _pretty_roman(label: str) -> str:
+    """A chord label as a musician writes it: iiø⁷, vii°⁷, V⁶₅/V, i⁶₄."""
+    if label.startswith("Cad"):
+        return "cadential ⁶₄"
+    head, _, target = label.partition("/")
+    colour = ""
+    if "(" in head:
+        head, colour = head.split("(", 1)
+        colour = " " + colour.rstrip(")")
+    m = re.match(r"^([b#]?[ivIV]+|N|It|Fr|Ger)([o%+]?)(\d*)(.*)$", head)
+    if not m:
+        return label
+    numeral, quality, fig, rest = m.groups()
+    if numeral in ("It", "Fr", "Ger"):
+        return numeral + "⁺⁶" + ("/" + _pretty_roman(target) if target else "")
+    rest = rest.replace("b9", "♭⁹")
+    quality = {"o": "°", "%": "ø", "+": "⁺"}.get(quality, quality)
+    if len(fig) == 2 and fig != "7" and fig not in ("11", "13"):
+        fig = fig[0].translate(_SUP) + fig[1].translate(_SUB)
+    else:
+        fig = fig.translate(_SUP)
+    out = numeral.replace("b", "♭").replace("#", "♯") + quality + fig + rest + colour
+    return out + ("/" + _pretty_roman(target) if target else "")
+
+
 def _forces(ensemble: str) -> str:
     return _FORCES.get(ensemble, ensemble.replace("_", " "))
 
@@ -334,7 +363,8 @@ def _part_message(plan: CompositionPlan, summary: dict, key: str, bars: int, tem
                 "to come back in.")
     else:
         chords = summary.get("progression") or []
-        shown = " – ".join(chords[:12]) + (" …" if len(chords) > 12 else "")
+        shown = " – ".join(_pretty_roman(c) for c in chords[:12]) + \
+            (" …" if len(chords) > 12 else "")
         body = (f"The chords are named above the staff; in Roman numerals it runs "
                 f"{shown}. Voice-led, with the bass in the left hand.")
     tail = ""

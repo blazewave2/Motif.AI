@@ -516,12 +516,18 @@ class _Builder:
                 continue
             home = part.clefs.get(staff, "G" if staff == 1 else "F")
             current = home
-            for m in part.measures:
-                pitches = sorted(p.midi for notes in m.voices.values() for n in notes
-                                 if n.staff == staff and not n.grace for p in n.pitches)
-                if not pitches:
-                    continue
+            bars = [(m, sorted(p.midi for notes in m.voices.values() for n in notes
+                               if n.staff == staff and not n.grace for p in n.pitches))
+                    for m in part.measures]
+            bars = [(m, ps) for m, ps in bars if ps]
+            for i, (m, pitches) in enumerate(bars):
                 want = _clef_for(pitches, current, home)
+                if want != current and current == home and not _far(pitches, home):
+                    # leave the home clef only for a passage, not for one bar
+                    # that merely brushes past middle C
+                    nxt = bars[i + 1][1] if i + 1 < len(bars) else None
+                    if nxt is None or _clef_for(nxt, want, home) != want:
+                        continue
                 if want != current:
                     m.clefs = dict(m.clefs or {})
                     m.clefs[staff] = want
@@ -545,12 +551,20 @@ class _Builder:
 
 
 # ---------------------------------------------------------------------------
+def _far(pitches: list[int], home: str) -> bool:
+    """Whether a bar lies so far from its staff's home that it needs the
+    other clef even for a single bar."""
+    if home == "F":
+        return pitches[0] >= 64
+    return pitches[-1] <= 53
+
+
 def _clef_for(pitches: list[int], current: str, home: str) -> str:
     lo, hi = pitches[0], pitches[-1]
     median = pitches[len(pitches) // 2]
     if current == "F":
         if home == "F":
-            return "G" if lo >= 55 and median >= 64 else "F"
+            return "G" if lo >= 60 and median >= 65 else "F"
         return "G" if hi > 67 or median > 57 else "F"         # a right hand coming home
     if home == "G":
         return "F" if hi <= 60 and median <= 52 else "G"
