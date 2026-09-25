@@ -478,3 +478,27 @@ def test_no_oom_pah_under_a_piece_in_three_that_is_not_a_dance():
         assert _errors(c.msn) == []
     w, _ = _compose("A Tchaikovsky waltz", seed=1)
     assert w.time == (3, 4)
+
+
+
+@pytest.mark.parametrize("roman,key,colour", [
+    ("i(add9)", "D minor", 4),        # the added ninth, E
+    ("I(add6)", "F major", 2),        # the added sixth, D
+    ("IV(maj7)", "C major", 4),       # the major seventh, E
+    ("i", "A minor", 0),              # a plain triad takes its tenth, C
+])
+def test_a_pedalled_chord_sounds_its_colour(roman, key, colour):
+    """The open sonority under an impressionist's tune: the bass, its fifth,
+    and the tone that colours the chord — or, for a plain triad, its tenth
+    rather than a bare octave."""
+    from fractions import Fraction as F
+    from motif.composer.harmony import Harmony
+    from motif.composer.texture import TextureContext, sustained
+    k = Key.parse(key)
+    h = Harmony(roman, k, F(0), F(4))
+    ctx = TextureContext((4, 4), F(4), F(1), k)
+    notes = sustained(h, F(0), F(4), ctx)[0].midis
+    bass = min(notes)
+    assert (bass + 7) in notes                        # the open fifth
+    assert colour in {m % 12 for m in notes if m > bass + 7}
+

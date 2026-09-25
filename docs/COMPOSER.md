@@ -170,7 +170,9 @@ the nocturne left hand spread over a tenth and more; Rachmaninoff's bells —
 a deep octave tolling on the beat, answered by the chord in the tenor; wide
 triplet and sixteenth-note arpeggios; the waltz bass; Mozart's Alberti bass
 (in eighths at an Allegro, sixteenths when slower); repeated chords; a
-walking bass; open pedalled sonorities; and, for inventions, the subject
+walking bass; open pedalled sonorities (the bass and its fifth with the
+chord's own colour above them, its seventh, ninth or added sixth, so that an
+impressionist's harmony is heard); and, for inventions, the subject
 answered in the left hand an octave lower while the right hand plays a
 countersubject that is kept consonant with it. Every realiser voice-leads
 from the chord before, keeps under the melody, and keeps each hand inside
