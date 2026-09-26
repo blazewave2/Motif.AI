@@ -15,11 +15,22 @@ phrasing, pedalling, dynamics and rubato — and opens it in MuseScore.
 "Create a simple melody for me to play."
 
 "Make a full Rachmaninoff style piano concerto using a dark E♭ minor melody."
+
+"Write 24 bars in C minor at 92 bpm: begin quietly with a singing melody,
+then build to a thunderous climax with bass octaves, finally bring back the
+opening theme and fade away."
 ```
 
 Both work. The first gives you sixteen playable bars almost instantly. The
 second gives you a 120-bar concerto for piano and orchestra, with solo and
 tutti trading, a cadenza and a coda.
+
+Ordered directions in the third example control the section map, rather than
+only the overall mood. They can specify a relative or named key, left-hand
+texture, dynamic, climax and return. An explicitly requested bar count and BPM
+are treated as constraints. The result is a generated draft for you to judge
+and edit: a composer's style profile cannot reproduce that composer's genius
+or promise concert-quality music from every request.
 
 ## Getting started
 

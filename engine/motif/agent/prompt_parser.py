@@ -7,6 +7,7 @@ still works fully offline.
 from __future__ import annotations
 
 import difflib
+import hashlib
 import random
 import re
 
@@ -230,7 +231,10 @@ def parse_prompt(prompt: str, *, seed: int | None = None,
                  previous: CompositionPlan | None = None) -> CompositionPlan:
     """Build a complete plan from a free-text request."""
     text = _canon(prompt)
-    rng = random.Random(seed if seed is not None else abs(hash(text)) % (2 ** 31))
+    # Python's hash is salted per process; the same request should survive a
+    # server restart with the same musical result.
+    stable_seed = int.from_bytes(hashlib.sha256(text.encode("utf-8")).digest()[:8], "big")
+    rng = random.Random(seed if seed is not None else stable_seed)
 
     # -- style ------------------------------------------------------------
     matches = match_styles(text)
@@ -326,7 +330,8 @@ def parse_prompt(prompt: str, *, seed: int | None = None,
     if bpm is None:
         lo, hi = style.tempo_range
         bpm = int(lo + (hi - lo) * (0.35 + rng.random() * 0.3))
-    bpm = int(max(32, min(220, bpm + tempo_shift)))
+    # An explicit BPM is a constraint, not a suggestion to offset for mood.
+    bpm = int(max(30, min(240, bpm if mb2 else bpm + tempo_shift)))
     if not tempo_text:
         tempo_text = rng.choice(style.tempo_terms) if style.tempo_terms else ""
 
@@ -338,6 +343,12 @@ def parse_prompt(prompt: str, *, seed: int | None = None,
         s.dynamic = _shift(s.dynamic or "mf", int(round(dyn_shift)))
     if simple:
         sections = _simplify(sections, style)
+
+    # A narrated arc ("begin softly, then grow turbulent, finally return")
+    # is a more specific instruction than an automatically selected form.
+    from .brief import apply_narrated_arc
+    sections = apply_narrated_arc(prompt, sections, key, style, bars,
+                                  parse_key, MOODS, _shift)
 
     instruments = build_instruments(ensemble)
     if simple and ensemble == "solo_piano":

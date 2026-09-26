@@ -60,6 +60,18 @@ revision, and **validates every field it gets back** against the allowed sets;
 anything unrecognised falls back to the draft. `agent.py` routes six intents:
 create, continue, develop, harmonize, edit, analyze.
 
+`brief.py` compiles ordered instructions such as "begin softly, then build to
+an octave climax, finally return to the opening theme" into distinct sections.
+Each section has a key, texture, dynamic, energy and motif operation. It also
+apportions the requested bar count exactly, including for ordinary formal
+templates. Explicit BPM takes precedence over mood-related tempo shifts, and
+the same unseeded prompt now produces the same plan after a server restart.
+After optional language planning, the agent reapplies explicit key, meter,
+tempo, style, form, length and ordered-section constraints from the musician.
+The symbolic renderer remains responsible for the actual notes; a profile is
+an encoded set of compositional tendencies, not a recreation of a person's
+judgement or a guarantee of a particular artistic standard.
+
 Neither the composer nor the instrumentation is ever a stored setting — both
 come from the prompt on every request. "Continue in the same style" is
 resolved two ways, in order: the exact style, ensemble and instrumentation
