@@ -145,6 +145,7 @@ class MotifAgent:
     # ------------------------------------------------------------------
     def _plan_for(self, req: Request, seed_hint: int | None = None) -> CompositionPlan:
         plan = parse_prompt(req.prompt, seed=req.seed if req.seed is not None else seed_hint)
+        draft = plan
         if req.style:
             plan.style = resolve_style(req.style).name
         if req.ensemble:
@@ -155,6 +156,33 @@ class MotifAgent:
                 plan = self.planner.refine(req.prompt, plan)
             except Exception:
                 pass                          # the local plan is always usable
+        # An optional language planner may propose a better musical structure,
+        # but explicit musician constraints always win over its guesses.
+        from .brief import _BOUNDARY, _weight_bars
+        if re.search(r"\b\d{1,3}\s*(?:bars?|measures?)\b", req.prompt, re.I):
+            _weight_bars(plan.sections, draft.total_bars)
+        if re.search(r"\b\d{2,3}\s*(?:bpm|beats per minute)\b", req.prompt, re.I):
+            plan.tempo = draft.tempo
+        if re.search(r"\b\d{1,2}\s*/\s*\d{1,2}\b", req.prompt):
+            plan.time = draft.time
+        tonic, _ = parse_key(req.prompt.lower(), req.prompt)
+        if tonic:
+            plan.key = draft.key
+        from ..compose.styles import match_styles
+        from .prompt_parser import FORM_WORDS, _detect, _fuzzy_style
+        if match_styles(req.prompt.lower()) or _fuzzy_style(req.prompt.lower()):
+            plan.style = draft.style
+        if _detect(req.prompt.lower(), FORM_WORDS):
+            plan.form = draft.form
+        if 2 <= len(_BOUNDARY.split(req.prompt)) <= 5 and self.planner is not None:
+            # Preserve the requested order, even if the planner omits a
+            # transition or changes the length of the return.
+            plan.sections = draft.sections
+        if req.style:
+            plan.style = resolve_style(req.style).name
+        if req.ensemble:
+            plan.ensemble = req.ensemble
+            plan.instruments = build_instruments(req.ensemble)
         return plan
 
     def _finish(self, plan: CompositionPlan, message: str,
@@ -553,5 +581,3 @@ def _fit_section_bars(sections: list[SectionPlan], total: int) -> None:
         s.bars = max(1, int(round(s.bars * scale)))
     drift = total - sum(s.bars for s in sections)
     sections[-1].bars = max(1, sections[-1].bars + drift)
-
-
